@@ -9,9 +9,9 @@ const app = express();
 
 app.use(express.json());
 app.use("/users", userRoutes);
-app.use("/campaigns", campaignRoutes);
-app.use("/messages", messageRoutes);
-app.use("/receivers", receiverRoutes);
+// app.use("/campaigns", campaignRoutes);
+// app.use("/messages", messageRoutes);
+// app.use("/receivers", receiverRoutes);
 app.use("/whatsapp", whatsappRoutes);
 
 module.exports = app;

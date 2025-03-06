@@ -5,7 +5,7 @@ const router = express.Router();
 
 router.post("/send", async (req, res) => {
     const { contacts } = req.body; // Expecting an array of { number, message }
-
+    console.log(contacts);
     if (!contacts || !Array.isArray(contacts)) {
         return res.status(400).json({ error: "Invalid contacts format. Must be an array." });
     }
