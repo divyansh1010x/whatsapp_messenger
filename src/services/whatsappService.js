@@ -8,6 +8,8 @@ const sendMessage = async (contacts) => {
     await page.goto("https://web.whatsapp.com");
     await page.waitForSelector("#side", { timeout: 60000 });
 
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
     for (let contact of contacts) {
         const whatsappURL = `https://web.whatsapp.com/send?phone=${contact.number}&text=${encodeURIComponent(contact.message)}`;
         await page.goto(whatsappURL);
@@ -26,7 +28,9 @@ const sendMessage = async (contacts) => {
     }
 
     console.log("✅ All messages sent!");
-    await browser.close();
+    setTimeout(() => {
+        browser.close();
+    }, 2000);    
 };
 
 module.exports = { sendMessage };
