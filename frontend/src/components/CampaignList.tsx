@@ -6,7 +6,45 @@ interface CampaignListProps {
   onStart: (id: string) => void;
 }
 
-function CampaignList({ campaigns, onStart }: CampaignListProps) {
+function CampaignList({ campaigns }: CampaignListProps) {
+  const handleStart = async (id: string) => {
+    // Retrieve campaigns from localStorage
+    const campaigns = JSON.parse(localStorage.getItem("campaigns") || "[]");
+  
+    // Find the campaign with the matching ID
+    const campaignToSend = campaigns.find((c: Campaign) => c.id === id);
+  
+    if (!campaignToSend) {
+      console.error("Campaign not found");
+      return;
+    }
+  
+    try {
+      const response = await fetch("http://localhost:5000/api/campaign/start-campaign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(campaignToSend),
+      });
+  
+      if (!response.ok) {
+        throw new Error("Failed to start campaign");
+      }
+  
+      const result = await response.json();
+      console.log("Campaign started:", result);
+  
+      // Optional: Update localStorage to mark it as "sending"
+      // const updatedCampaigns = campaigns.map((c: Campaign) =>
+      //   c.id === id ? { ...c, status: "sending" } : c
+      // );
+      // localStorage.setItem("campaigns", JSON.stringify(updatedCampaigns));
+  
+      // Optionally trigger a state update
+    } catch (error) {
+      console.error("Error starting campaign:", error);
+    }
+  };
+  
   return (
     <div className="space-y-4">
       {campaigns.map((campaign) => (
@@ -26,28 +64,28 @@ function CampaignList({ campaigns, onStart }: CampaignListProps) {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              {campaign.status === 'pending' && (
+              {campaign.status === "pending" && (
                 <button
-                  onClick={() => onStart(campaign.id)}
+                  onClick={() => handleStart(campaign.id)}
                   className="flex items-center px-4 py-2 bg-whatsapp-primary text-white rounded-lg hover:bg-whatsapp-secondary transition-colors"
                 >
                   <Send className="h-4 w-4 mr-2" />
                   Start
                 </button>
               )}
-              {campaign.status === 'sending' && (
+              {campaign.status === "sending" && (
                 <div className="flex items-center text-yellow-600">
                   <Send className="h-5 w-5 mr-1 animate-pulse" />
                   Sending...
                 </div>
               )}
-              {campaign.status === 'completed' && (
+              {campaign.status === "completed" && (
                 <div className="flex items-center text-whatsapp-primary">
                   <CheckCircle className="h-5 w-5 mr-1" />
                   Completed
                 </div>
               )}
-              {campaign.status === 'failed' && (
+              {campaign.status === "failed" && (
                 <div className="flex items-center text-red-600">
                   <XCircle className="h-5 w-5 mr-1" />
                   Failed
@@ -55,23 +93,6 @@ function CampaignList({ campaigns, onStart }: CampaignListProps) {
               )}
             </div>
           </div>
-          {(campaign.status === 'sending' || campaign.status === 'completed') && (
-            <div className="mt-4">
-              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className={`h-2 rounded-full transition-all duration-300 ${
-                    campaign.status === 'completed' ? 'bg-whatsapp-primary' : 'bg-whatsapp-secondary animate-pulse'
-                  }`}
-                  style={{
-                    width: `${(campaign.sentMessages / campaign.totalMessages) * 100}%`,
-                  }}
-                />
-              </div>
-              <div className="mt-1 text-right text-sm text-gray-500">
-                {campaign.sentMessages} / {campaign.totalMessages} messages sent
-              </div>
-            </div>
-          )}
         </div>
       ))}
       {campaigns.length === 0 && (

@@ -78,7 +78,11 @@ function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
                   <MessageSquare className="h-4 w-4 mr-2 mt-1 text-whatsapp-secondary" />
                   <div className="flex-1">
                     <p className="font-medium mb-1">Message Template:</p>
-                    <p className="whitespace-pre-wrap">{campaign.details.messageTemplate}</p>
+                    <div className="whitespace-pre-wrap space-y-2">
+                      {campaign.details.messageTemplate.map((msg, index) => (
+                        <p key={index}>{msg.day}: {msg.message}</p>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>

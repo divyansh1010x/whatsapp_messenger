@@ -26,7 +26,7 @@ const sendMessage = async (contacts) => {
             if (!inputBox) throw new Error("Message input box not found");
 
             await inputBox.click();
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
             const sendButton = await page.waitForSelector("span[data-icon='send']", { timeout: 5000 });
             if (sendButton) {

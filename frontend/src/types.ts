@@ -1,11 +1,12 @@
 export interface Contact {
   name: string;
   phoneNumber: string;
+  count: number;
 }
 
 export interface CampaignDetails {
   scheduledDate: string;
-  messageTemplate: string;
+  messageTemplate: { day: string; message: string }[]; // Array of objects instead of string
 }
 
 export interface Campaign {

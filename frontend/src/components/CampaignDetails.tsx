@@ -10,8 +10,7 @@ interface CampaignDetailsFormProps {
 function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
   const [scheduledDate, setScheduledDate] = useState('');
   const [messageTemplate, setMessageTemplate] = useState('');
-  const [csvContent, setCsvContent] = useState<string | null>(null);
-  const [rawCsvData, setRawCsvData] = useState<string[][]>([]);
+  const [csvData, setCsvData] = useState<{ day: string; message: string }[]>([]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -19,14 +18,15 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        setCsvContent(text);
-        // Parse CSV data into rows and columns
         const rows = text.split('\n').map(row => row.split(',').map(cell => cell.trim()));
-        setRawCsvData(rows);
-        // Use first row as message template
-        if (rows.length > 0) {
-          setMessageTemplate(rows[0].join(',').trim());
-        }
+        
+        // Convert CSV data to JSON format
+        const formattedData = rows.map(row => ({
+          day: row[0] || '',
+          message: row[1] || ''
+        })).filter(item => item.day && item.message);
+        
+        setCsvData(formattedData);
       };
       reader.readAsText(file);
     }
@@ -36,9 +36,9 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
     e.preventDefault();
     onSave({
       scheduledDate,
-      messageTemplate: csvContent || messageTemplate,
+      messageTemplate: csvData, // Store as an array instead of a string
     });
-  };
+  };   
 
   return (
     <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20">
@@ -94,37 +94,13 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
             </div>
           </div>
 
-          {rawCsvData.length > 0 && (
+          {csvData.length > 0 && (
             <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
               <div className="bg-whatsapp-light/30 px-3 py-2 border-b border-gray-200">
                 <h3 className="text-sm font-medium text-whatsapp-dark">CSV Preview</h3>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
-                  <tbody>
-                    {rawCsvData.map((row, rowIndex) => (
-                      <tr 
-                        key={rowIndex} 
-                        className={`
-                          ${rowIndex === 0 ? 'bg-gray-50 font-medium' : 'bg-white'}
-                          ${rowIndex !== rawCsvData.length - 1 ? 'border-b border-gray-200' : ''}
-                        `}
-                      >
-                        {row.map((cell, cellIndex) => (
-                          <td
-                            key={cellIndex}
-                            className={`
-                              px-3 py-1.5 text-sm text-gray-600
-                              ${cellIndex !== row.length - 1 ? 'border-r border-gray-200' : ''}
-                            `}
-                          >
-                            {cell}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="overflow-x-auto p-4 text-sm text-gray-600">
+                <pre>{JSON.stringify(csvData, null, 2)}</pre>
               </div>
             </div>
           )}
@@ -139,7 +115,7 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
               className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-whatsapp-primary focus:border-transparent"
               rows={4}
               placeholder="Enter your message template here..."
-              required={!csvContent}
+              required={!csvData.length}
             />
           </div>
         </div>

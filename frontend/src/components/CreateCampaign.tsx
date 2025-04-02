@@ -20,7 +20,7 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
   const [campaignName, setCampaignName] = useState('');
   const [countryCode, setCountryCode] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [newContact, setNewContact] = useState({ name: '', phoneNumber: '' });
+  const [newContact, setNewContact] = useState<Contact>({ name: '', phoneNumber: '', count: 1 });
   const [addMethod, setAddMethod] = useState<'manual' | 'csv' | null>(null);
   const [campaignDetails, setCampaignDetails] = useState<CampaignDetails | null>(null);
 
@@ -33,18 +33,19 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
         const rows = text.split('\n').map(row => row.split(','));
         const newContacts: Contact[] = rows.slice(1).map(row => ({
           name: row[0]?.trim() || '',
-          phoneNumber: row[1]?.trim() || ''
+          phoneNumber: row[1]?.trim() || '',
+          count: 1 // Ensure every contact starts with count = 1
         })).filter(contact => contact.name && contact.phoneNumber);
         setContacts(prev => [...prev, ...newContacts]);
       };
       reader.readAsText(file);
     }
-  };
+  };  
 
   const handleAddContact = () => {
     if (newContact.name && newContact.phoneNumber) {
-      setContacts(prev => [...prev, newContact]);
-      setNewContact({ name: '', phoneNumber: '' });
+      setContacts(prev => [...prev, { ...newContact, count: 1 }]); // Ensure count is 1
+      setNewContact({ name: '', phoneNumber: '', count: 1 });
     }
   };
 
@@ -205,7 +206,7 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
               <div className="mt-6">
                 <h3 className="text-lg font-medium mb-4">Contact List ({contacts.length})</h3>
                 <div className="space-y-2">
-                  {contacts.map((contact, index) => (
+                {contacts.map((contact, index) => (
                     <div key={index} className="flex items-center justify-between bg-whatsapp-light/30 p-4 rounded-lg">
                       <div>
                         <p className="font-medium text-whatsapp-dark">{contact.name}</p>
