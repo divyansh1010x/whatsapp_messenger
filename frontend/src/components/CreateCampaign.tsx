@@ -20,7 +20,7 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
   const [campaignName, setCampaignName] = useState('');
   const [countryCode, setCountryCode] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [newContact, setNewContact] = useState<Contact>({ name: '', phoneNumber: '', count: 1 });
+  const [newContact, setNewContact] = useState<Contact>({ name: '', number: '', count: 1 });
   const [addMethod, setAddMethod] = useState<'manual' | 'csv' | null>(null);
   const [campaignDetails, setCampaignDetails] = useState<CampaignDetails | null>(null);
 
@@ -33,9 +33,9 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
         const rows = text.split('\n').map(row => row.split(','));
         const newContacts: Contact[] = rows.slice(1).map(row => ({
           name: row[0]?.trim() || '',
-          phoneNumber: row[1]?.trim() || '',
+          number: row[1]?.trim() || '',
           count: 1 // Ensure every contact starts with count = 1
-        })).filter(contact => contact.name && contact.phoneNumber);
+        })).filter(contact => contact.name && contact.number);
         setContacts(prev => [...prev, ...newContacts]);
       };
       reader.readAsText(file);
@@ -43,9 +43,9 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
   };  
 
   const handleAddContact = () => {
-    if (newContact.name && newContact.phoneNumber) {
+    if (newContact.name && newContact.number) {
       setContacts(prev => [...prev, { ...newContact, count: 1 }]); // Ensure count is 1
-      setNewContact({ name: '', phoneNumber: '', count: 1 });
+      setNewContact({ name: '', number: '', count: 1 });
     }
   };
 
@@ -159,8 +159,8 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
                       />
                       <input
                         type="text"
-                        value={newContact.phoneNumber}
-                        onChange={(e) => setNewContact({ ...newContact, phoneNumber: e.target.value })}
+                        value={newContact.number}
+                        onChange={(e) => setNewContact({ ...newContact, number: e.target.value })}
                         placeholder="Phone number"
                         className="px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-whatsapp-primary focus:border-transparent"
                       />
@@ -210,7 +210,7 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
                     <div key={index} className="flex items-center justify-between bg-whatsapp-light/30 p-4 rounded-lg">
                       <div>
                         <p className="font-medium text-whatsapp-dark">{contact.name}</p>
-                        <p className="text-sm text-gray-600">{contact.phoneNumber}</p>
+                        <p className="text-sm text-gray-600">{contact.number}</p>
                       </div>
                       <button
                         onClick={() => handleRemoveContact(index)}

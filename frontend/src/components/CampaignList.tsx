@@ -1,23 +1,43 @@
-import { Calendar, Send, CheckCircle, XCircle, Users } from 'lucide-react';
-import { Campaign } from '../types';
+import { Calendar, Send, CheckCircle, XCircle, Users, Loader } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Campaign, Contact } from '../types';
 
 interface CampaignListProps {
   campaigns: Campaign[];
-  onStart: (id: string) => void;
 }
 
-function CampaignList({ campaigns }: CampaignListProps) {
+function CampaignList({ campaigns }: CampaignListProps) {  
+  const [campaignStatus, setCampaignStatus] = useState<{ 
+    [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] } 
+  }>({});
+
+  useEffect(() => {
+    // Load initial status from localStorage
+    const storedCampaigns = JSON.parse(localStorage.getItem("campaigns") || "[]");
+    const statusMap: { [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] } } = {};
+
+    storedCampaigns.forEach((c: Campaign) => {
+      statusMap[c.id] = {
+        status: c.status,
+        sent: c.sentMessages,
+        total: c.totalMessages,
+        failedContacts: c.todaysFailedMessages?.map((contact: Contact) => contact.number) || [],
+      };
+    });
+
+    setCampaignStatus(statusMap);
+  }, []);
+
   const handleStart = async (id: string) => {
-    // Retrieve campaigns from localStorage
     const campaigns = JSON.parse(localStorage.getItem("campaigns") || "[]");
-  
-    // Find the campaign with the matching ID
     const campaignToSend = campaigns.find((c: Campaign) => c.id === id);
   
     if (!campaignToSend) {
       console.error("Campaign not found");
       return;
     }
+  
+    setCampaignStatus((prev) => ({ ...prev, [id]: { status: "sending" } }));
   
     try {
       const response = await fetch("http://localhost:5000/api/campaign/start-campaign", {
@@ -31,17 +51,57 @@ function CampaignList({ campaigns }: CampaignListProps) {
       }
   
       const result = await response.json();
-      console.log("Campaign started:", result);
   
-      // Optional: Update localStorage to mark it as "sending"
-      // const updatedCampaigns = campaigns.map((c: Campaign) =>
-      //   c.id === id ? { ...c, status: "sending" } : c
-      // );
-      // localStorage.setItem("campaigns", JSON.stringify(updatedCampaigns));
+      const sentCount = result.sentCount ?? 0;
+      const failedContacts = result.failedContacts ?? [];
+      const totalContacts = result.totalContacts ?? 0;
   
-      // Optionally trigger a state update
+      const countryCode = campaignToSend.countryCode;
+      const failedPhoneNumbers = new Set(
+        failedContacts.map((c: Contact) => c.number?.replace(countryCode, ""))
+      );
+  
+      const updatedContacts = campaignToSend.contacts.map((contact: Contact) => ({
+        ...contact,
+        count: failedPhoneNumbers.has(contact.number) ? contact.count : (contact.count ?? 0) + 1,
+      }));
+  
+      const updatedCampaigns = campaigns.map((c: Campaign) =>
+        c.id === id
+          ? {
+              ...c,
+              contacts: updatedContacts,
+              sentMessages: sentCount,
+              totalMessages: totalContacts,
+              status: "completed",
+              todaysFailedMessages: failedContacts,
+            }
+          : c
+      );
+  
+      localStorage.setItem("campaigns", JSON.stringify(updatedCampaigns));
+  
+      // ✅ Immediately update UI state
+      setCampaignStatus((prev) => ({
+        ...prev,
+        [id]: {
+          status: "completed",
+          sent: sentCount,
+          total: totalContacts,
+          failedContacts: failedContacts,
+        },
+      }));
     } catch (error) {
       console.error("Error starting campaign:", error);
+  
+      const updatedCampaigns = campaigns.map((c: Campaign) =>
+        c.id === id ? { ...c, status: "failed" } : c
+      );
+  
+      localStorage.setItem("campaigns", JSON.stringify(updatedCampaigns));
+  
+      // ✅ Immediately reflect failure
+      setCampaignStatus((prev) => ({ ...prev, [id]: { status: "failed" } }));
     }
   };
   
@@ -64,7 +124,8 @@ function CampaignList({ campaigns }: CampaignListProps) {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              {campaign.status === "pending" && (
+              {/* Hide Start button if campaign is completed */}
+              {!campaignStatus[campaign.id] || campaignStatus[campaign.id]?.status === "pending" ? (
                 <button
                   onClick={() => handleStart(campaign.id)}
                   className="flex items-center px-4 py-2 bg-whatsapp-primary text-white rounded-lg hover:bg-whatsapp-secondary transition-colors"
@@ -72,20 +133,25 @@ function CampaignList({ campaigns }: CampaignListProps) {
                   <Send className="h-4 w-4 mr-2" />
                   Start
                 </button>
-              )}
-              {campaign.status === "sending" && (
+              ) : null}
+
+              {campaignStatus[campaign.id]?.status === "sending" && (
                 <div className="flex items-center text-yellow-600">
-                  <Send className="h-5 w-5 mr-1 animate-pulse" />
+                  <Loader className="h-5 w-5 mr-1 animate-spin" />
                   Sending...
                 </div>
               )}
-              {campaign.status === "completed" && (
-                <div className="flex items-center text-whatsapp-primary">
-                  <CheckCircle className="h-5 w-5 mr-1" />
-                  Completed
+
+              {campaignStatus[campaign.id]?.status === "completed" && (
+                <div className="text-whatsapp-primary">
+                  <div className="flex items-center">
+                    <CheckCircle className="h-5 w-5 mr-1" />
+                    Sent {campaignStatus[campaign.id]?.sent ?? "?"}/{campaignStatus[campaign.id]?.total ?? "?"}
+                  </div>
                 </div>
               )}
-              {campaign.status === "failed" && (
+
+              {campaignStatus[campaign.id]?.status === "failed" && (
                 <div className="flex items-center text-red-600">
                   <XCircle className="h-5 w-5 mr-1" />
                   Failed

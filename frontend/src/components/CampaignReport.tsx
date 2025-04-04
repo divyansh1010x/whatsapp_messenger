@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ArrowLeft, Calendar, MessageSquare, Users, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { Campaign } from '../types';
 
@@ -7,6 +8,41 @@ interface CampaignReportProps {
 }
 
 function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
+  const [localCampaigns, setLocalCampaigns] = useState<Campaign[]>([]);
+
+  // Function to load campaign status from local storage
+  const loadCampaignStatus = () => {
+    const updatedCampaigns = campaigns.map((campaign) => {
+      const storedStatus = localStorage.getItem(`campaign_status_${campaign.id}`);
+      console.log(storedStatus);      
+      const storedFailedMessages = localStorage.getItem(`failed_messages_${campaign.id}`);
+  
+      return {
+        ...campaign,
+        status: (storedStatus === "pending" || storedStatus === "sending" || storedStatus === "completed" || storedStatus === "failed") 
+                 ? storedStatus 
+                 : campaign.status, // Ensure type safety
+        todaysFailedMessages: storedFailedMessages ? JSON.parse(storedFailedMessages) : campaign.todaysFailedMessages,
+      };
+    });
+  
+    setLocalCampaigns(updatedCampaigns);
+  };
+   
+
+  // Load from local storage when component mounts
+  useEffect(() => {
+    loadCampaignStatus();
+
+    // Listen for local storage changes
+    const handleStorageChange = () => {
+      loadCampaignStatus();
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [campaigns]);
+
   const getStatusColor = (status: Campaign['status']) => {
     switch (status) {
       case 'completed':
@@ -46,7 +82,7 @@ function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
       </div>
 
       <div className="space-y-6">
-        {campaigns.map((campaign) => (
+        {localCampaigns.map((campaign) => (
           <div key={campaign.id} className="border border-gray-100 rounded-xl p-6 space-y-4 bg-white shadow-sm hover:shadow-md transition-shadow">
             <div className="flex justify-between items-start">
               <div>
@@ -68,26 +104,23 @@ function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
               </div>
             </div>
 
-            {campaign.details && (
-              <div className="bg-whatsapp-light/30 p-4 rounded-xl space-y-3">
-                <div className="flex items-center text-sm text-gray-600">
-                  <Calendar className="h-4 w-4 mr-2 text-whatsapp-secondary" />
-                  <span>Scheduled: {new Date(campaign.details.scheduledDate).toLocaleString()}</span>
-                </div>
-                <div className="flex items-start text-sm text-gray-600">
-                  <MessageSquare className="h-4 w-4 mr-2 mt-1 text-whatsapp-secondary" />
-                  <div className="flex-1">
-                    <p className="font-medium mb-1">Message Template:</p>
-                    <div className="whitespace-pre-wrap space-y-2">
-                      {campaign.details.messageTemplate.map((msg, index) => (
-                        <p key={index}>{msg.day}: {msg.message}</p>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Failed Messages Section */}
+            <div className="bg-red-50 p-4 rounded-xl space-y-2">
+              <p className="text-red-700 font-medium">Today's Failed Messages:</p>
+              {campaign.todaysFailedMessages && campaign.todaysFailedMessages.length > 0 ? (
+                <ul className="text-sm text-gray-600 space-y-1">
+                  {campaign.todaysFailedMessages.map((contact, index) => (
+                    <li key={index} className="flex justify-between border-b py-1">
+                      <span>{contact.number}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">No Failed Messages</p>
+              )}
+            </div>
 
+            {/* Campaign Progress */}
             {(campaign.status === 'sending' || campaign.status === 'completed') && (
               <div>
                 <div className="flex justify-between text-sm text-gray-600 mb-2">
@@ -107,7 +140,8 @@ function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
           </div>
         ))}
 
-        {campaigns.length === 0 && (
+        {/* No Campaigns Case */}
+        {localCampaigns.length === 0 && (
           <div className="text-center py-12 bg-whatsapp-light/30 rounded-xl">
             <MessageSquare className="h-12 w-12 mx-auto mb-4 text-whatsapp-secondary opacity-50" />
             <p className="text-lg text-gray-600">No campaigns found. Create your first campaign to get started.</p>
