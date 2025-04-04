@@ -28,8 +28,7 @@ function Dashboard() {
     return (
       <CampaignReport 
         campaigns={campaigns} 
-        onBack={() => setShowReports(false)} 
-        triggerLoad={true} // This is what tells CampaignReport to load from localStorage
+        onBack={() => setShowReports(false)}
       />
     );
   }
@@ -53,7 +52,12 @@ function Dashboard() {
         </div>
 
         <div 
-          onClick={() => setShowReports(true)}
+          onClick={() => {
+            const stored = localStorage.getItem('campaigns');
+            const parsed = stored ? JSON.parse(stored) : [];
+            setCampaigns(parsed); // Optional: keep dashboard in sync
+            setShowReports(true);
+          }}          
           className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-8 cursor-pointer transform transition-all hover:scale-105 hover:bg-whatsapp-light border border-white/20"
         >
           <div className="flex flex-col items-center justify-center h-full space-y-4">

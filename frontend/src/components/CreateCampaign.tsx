@@ -205,8 +205,8 @@ function CreateCampaign({ onSave, onCancel }: CreateCampaignProps) {
             {contacts.length > 0 && (
               <div className="mt-6">
                 <h3 className="text-lg font-medium mb-4">Contact List ({contacts.length})</h3>
-                <div className="space-y-2">
-                {contacts.map((contact, index) => (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                  {contacts.map((contact, index) => (
                     <div key={index} className="flex items-center justify-between bg-whatsapp-light/30 p-4 rounded-lg">
                       <div>
                         <p className="font-medium text-whatsapp-dark">{contact.name}</p>

@@ -5,36 +5,28 @@ import { Campaign } from '../types';
 interface CampaignReportProps {
   campaigns: Campaign[];
   onBack: () => void;
-  triggerLoad: boolean;
 }
 
-function CampaignReport({ campaigns, onBack, triggerLoad }: CampaignReportProps) {
+
+function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
   const [localCampaigns, setLocalCampaigns] = useState<Campaign[]>([]);
 
-  // Function to load campaign status from local storage
-  const loadCampaignStatus = () => {
+  useEffect(() => {
     const updatedCampaigns = campaigns.map((campaign) => {
       const storedStatus = localStorage.getItem(`campaign_status_${campaign.id}`);
-      console.log(storedStatus);      
       const storedFailedMessages = localStorage.getItem(`failed_messages_${campaign.id}`);
-  
+
       return {
         ...campaign,
         status: (storedStatus === "pending" || storedStatus === "sending" || storedStatus === "completed" || storedStatus === "failed") 
-                 ? storedStatus 
-                 : campaign.status, // Ensure type safety
+                ? storedStatus 
+                : campaign.status,
         todaysFailedMessages: storedFailedMessages ? JSON.parse(storedFailedMessages) : campaign.todaysFailedMessages,
       };
     });
-  
+
     setLocalCampaigns(updatedCampaigns);
-  };
-   
-  useEffect(() => {
-    if (triggerLoad) {
-      loadCampaignStatus();
-    }
-  }, [triggerLoad]);  
+  }, [campaigns]);
   
   const getStatusColor = (status: Campaign['status']) => {
     switch (status) {

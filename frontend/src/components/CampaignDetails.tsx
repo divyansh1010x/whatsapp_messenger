@@ -95,15 +95,27 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
           </div>
 
           {csvData.length > 0 && (
-            <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
-              <div className="bg-whatsapp-light/30 px-3 py-2 border-b border-gray-200">
-                <h3 className="text-sm font-medium text-whatsapp-dark">CSV Preview</h3>
+              <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-whatsapp-light/30 px-3 py-2 border-b border-gray-200">
+                  <h3 className="text-sm font-medium text-whatsapp-dark">
+                    Message Template Preview (showing top {Math.min(csvData.length, 10)} of {csvData.length})
+                  </h3>
+                </div>
+                <div className="p-4 space-y-2 text-sm text-gray-700">
+                  {csvData.slice(0, 10).map((item, index) => (
+                    <div
+                      key={index}
+                      className="flex items-start justify-between bg-whatsapp-light/30 p-4 rounded-lg border border-gray-200"
+                    >
+                      <div>
+                        <p className="font-semibold text-whatsapp-dark">Day {item.day}</p>
+                        <p className="text-gray-700 mt-1">{item.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="overflow-x-auto p-4 text-sm text-gray-600">
-                <pre>{JSON.stringify(csvData, null, 2)}</pre>
-              </div>
-            </div>
-          )}
+            )}
 
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
