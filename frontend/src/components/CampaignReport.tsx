@@ -5,9 +5,10 @@ import { Campaign } from '../types';
 interface CampaignReportProps {
   campaigns: Campaign[];
   onBack: () => void;
+  triggerLoad: boolean;
 }
 
-function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
+function CampaignReport({ campaigns, onBack, triggerLoad }: CampaignReportProps) {
   const [localCampaigns, setLocalCampaigns] = useState<Campaign[]>([]);
 
   // Function to load campaign status from local storage
@@ -29,20 +30,12 @@ function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
     setLocalCampaigns(updatedCampaigns);
   };
    
-
-  // Load from local storage when component mounts
   useEffect(() => {
-    loadCampaignStatus();
-
-    // Listen for local storage changes
-    const handleStorageChange = () => {
+    if (triggerLoad) {
       loadCampaignStatus();
-    };
-
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, [campaigns]);
-
+    }
+  }, [triggerLoad]);  
+  
   const getStatusColor = (status: Campaign['status']) => {
     switch (status) {
       case 'completed':
@@ -73,7 +66,9 @@ function CampaignReport({ campaigns, onBack }: CampaignReportProps) {
     <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20">
       <div className="flex items-center mb-6">
         <button
-          onClick={onBack}
+          onClick={() => {
+            onBack(); // This calls parent’s handleBack
+          }}
           className="mr-4 p-2 hover:bg-whatsapp-light rounded-full transition-colors"
         >
           <ArrowLeft className="h-6 w-6 text-whatsapp-dark" />

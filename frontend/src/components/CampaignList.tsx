@@ -6,15 +6,33 @@ interface CampaignListProps {
   campaigns: Campaign[];
 }
 
-function CampaignList({ campaigns }: CampaignListProps) {  
-  const [campaignStatus, setCampaignStatus] = useState<{ 
-    [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] } 
+function CampaignList({ campaigns }: CampaignListProps) {
+  const [campaignStatus, setCampaignStatus] = useState<{
+    [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] };
   }>({});
 
   useEffect(() => {
-    // Load initial status from localStorage
-    const storedCampaigns = JSON.parse(localStorage.getItem("campaigns") || "[]");
-    const statusMap: { [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] } } = {};
+    const today = new Date().toDateString();
+    const lastOpenedDate = localStorage.getItem('lastOpenedDate');
+    let storedCampaigns: Campaign[] = JSON.parse(localStorage.getItem('campaigns') || '[]');
+
+    if (lastOpenedDate !== today) {
+      // Reset statuses daily
+      storedCampaigns = storedCampaigns.map((c: Campaign) => ({
+        ...c,
+        status: 'pending',
+        sentMessages: 0,
+        totalMessages: 0,
+        todaysFailedMessages: [],
+      }));
+
+      localStorage.setItem('campaigns', JSON.stringify(storedCampaigns));
+      localStorage.setItem('lastOpenedDate', today);
+    }
+
+    const statusMap: {
+      [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] };
+    } = {};
 
     storedCampaigns.forEach((c: Campaign) => {
       statusMap[c.id] = {
@@ -29,43 +47,42 @@ function CampaignList({ campaigns }: CampaignListProps) {
   }, []);
 
   const handleStart = async (id: string) => {
-    const campaigns = JSON.parse(localStorage.getItem("campaigns") || "[]");
+    const campaigns = JSON.parse(localStorage.getItem('campaigns') || '[]');
     const campaignToSend = campaigns.find((c: Campaign) => c.id === id);
-  
+
     if (!campaignToSend) {
-      console.error("Campaign not found");
+      console.error('Campaign not found');
       return;
     }
-  
-    setCampaignStatus((prev) => ({ ...prev, [id]: { status: "sending" } }));
-  
+
+    setCampaignStatus((prev) => ({ ...prev, [id]: { status: 'sending' } }));
+
     try {
-      const response = await fetch("http://localhost:5000/api/campaign/start-campaign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch('http://localhost:5000/api/campaign/start-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(campaignToSend),
       });
-  
+
       if (!response.ok) {
-        throw new Error("Failed to start campaign");
+        throw new Error('Failed to start campaign');
       }
-  
+
       const result = await response.json();
-  
       const sentCount = result.sentCount ?? 0;
       const failedContacts = result.failedContacts ?? [];
       const totalContacts = result.totalContacts ?? 0;
-  
+
       const countryCode = campaignToSend.countryCode;
       const failedPhoneNumbers = new Set(
-        failedContacts.map((c: Contact) => c.number?.replace(countryCode, ""))
+        failedContacts.map((c: Contact) => c.number?.replace(countryCode, ''))
       );
-  
+
       const updatedContacts = campaignToSend.contacts.map((contact: Contact) => ({
         ...contact,
         count: failedPhoneNumbers.has(contact.number) ? contact.count : (contact.count ?? 0) + 1,
       }));
-  
+
       const updatedCampaigns = campaigns.map((c: Campaign) =>
         c.id === id
           ? {
@@ -73,42 +90,42 @@ function CampaignList({ campaigns }: CampaignListProps) {
               contacts: updatedContacts,
               sentMessages: sentCount,
               totalMessages: totalContacts,
-              status: "completed",
+              status: 'completed',
               todaysFailedMessages: failedContacts,
             }
           : c
       );
-  
-      localStorage.setItem("campaigns", JSON.stringify(updatedCampaigns));
-  
-      // ✅ Immediately update UI state
+
+      localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
+
       setCampaignStatus((prev) => ({
         ...prev,
         [id]: {
-          status: "completed",
+          status: 'completed',
           sent: sentCount,
           total: totalContacts,
-          failedContacts: failedContacts,
+          failedContacts: failedContacts.map((fc: Contact) => fc.number),
         },
       }));
     } catch (error) {
-      console.error("Error starting campaign:", error);
-  
+      console.error('Error starting campaign:', error);
+
       const updatedCampaigns = campaigns.map((c: Campaign) =>
-        c.id === id ? { ...c, status: "failed" } : c
+        c.id === id ? { ...c, status: 'failed' } : c
       );
-  
-      localStorage.setItem("campaigns", JSON.stringify(updatedCampaigns));
-  
-      // ✅ Immediately reflect failure
-      setCampaignStatus((prev) => ({ ...prev, [id]: { status: "failed" } }));
+
+      localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
+      setCampaignStatus((prev) => ({ ...prev, [id]: { status: 'failed' } }));
     }
   };
-  
+
   return (
     <div className="space-y-4">
       {campaigns.map((campaign) => (
-        <div key={campaign.id} className="border border-gray-100 rounded-xl p-4 bg-white shadow-sm hover:shadow-md transition-shadow">
+        <div
+          key={campaign.id}
+          className="border border-gray-100 rounded-xl p-4 bg-white shadow-sm hover:shadow-md transition-shadow"
+        >
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-medium text-whatsapp-dark">{campaign.name}</h3>
@@ -124,8 +141,7 @@ function CampaignList({ campaigns }: CampaignListProps) {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              {/* Hide Start button if campaign is completed */}
-              {!campaignStatus[campaign.id] || campaignStatus[campaign.id]?.status === "pending" ? (
+              {!campaignStatus[campaign.id] || campaignStatus[campaign.id]?.status === 'pending' ? (
                 <button
                   onClick={() => handleStart(campaign.id)}
                   className="flex items-center px-4 py-2 bg-whatsapp-primary text-white rounded-lg hover:bg-whatsapp-secondary transition-colors"
@@ -135,23 +151,24 @@ function CampaignList({ campaigns }: CampaignListProps) {
                 </button>
               ) : null}
 
-              {campaignStatus[campaign.id]?.status === "sending" && (
+              {campaignStatus[campaign.id]?.status === 'sending' && (
                 <div className="flex items-center text-yellow-600">
                   <Loader className="h-5 w-5 mr-1 animate-spin" />
                   Sending...
                 </div>
               )}
 
-              {campaignStatus[campaign.id]?.status === "completed" && (
+              {campaignStatus[campaign.id]?.status === 'completed' && (
                 <div className="text-whatsapp-primary">
                   <div className="flex items-center">
                     <CheckCircle className="h-5 w-5 mr-1" />
-                    Sent {campaignStatus[campaign.id]?.sent ?? "?"}/{campaignStatus[campaign.id]?.total ?? "?"}
+                    Sent {campaignStatus[campaign.id]?.sent ?? '?'}/
+                    {campaignStatus[campaign.id]?.total ?? '?'}
                   </div>
                 </div>
               )}
 
-              {campaignStatus[campaign.id]?.status === "failed" && (
+              {campaignStatus[campaign.id]?.status === 'failed' && (
                 <div className="flex items-center text-red-600">
                   <XCircle className="h-5 w-5 mr-1" />
                   Failed
@@ -161,6 +178,7 @@ function CampaignList({ campaigns }: CampaignListProps) {
           </div>
         </div>
       ))}
+
       {campaigns.length === 0 && (
         <div className="text-center py-12 text-gray-500 bg-whatsapp-light/50 rounded-xl">
           <Send className="h-12 w-12 mx-auto mb-4 text-whatsapp-secondary opacity-50" />

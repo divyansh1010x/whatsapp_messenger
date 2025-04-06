@@ -18,38 +18,22 @@ function Dashboard() {
     setCampaigns(updatedCampaigns);
     localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
     setShowCreateCampaign(false);
-  };
-
-  const simulateSendMessages = (campaignId: string) => {
-    const interval = setInterval(() => {
-      setCampaigns(prev => prev.map(campaign => {
-        if (campaign.id === campaignId && campaign.sentMessages < campaign.totalMessages) {
-          const newSentMessages = campaign.sentMessages + 1;
-          const newStatus: "completed" | "sending" = 
-            newSentMessages === campaign.totalMessages ? "completed" : "sending";
-          
-          return {
-            ...campaign,
-            sentMessages: newSentMessages,
-            status: newStatus,
-          };
-        }
-        return campaign;
-      }));
-    }, 100);
-  
-    setTimeout(() => clearInterval(interval), 10000);
-  };
-  
+  };  
 
   if (showCreateCampaign) {
     return <CreateCampaign onSave={handleCreateCampaign} onCancel={() => setShowCreateCampaign(false)} />;
   }
 
   if (showReports) {
-    return <CampaignReport campaigns={campaigns} onBack={() => setShowReports(false)} />;
+    return (
+      <CampaignReport 
+        campaigns={campaigns} 
+        onBack={() => setShowReports(false)} 
+        triggerLoad={true} // This is what tells CampaignReport to load from localStorage
+      />
+    );
   }
-
+    
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -86,7 +70,7 @@ function Dashboard() {
 
       <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20">
         <h2 className="text-xl font-semibold mb-4 text-whatsapp-dark">Your Campaigns</h2>
-        <CampaignList campaigns={campaigns} onStart={simulateSendMessages} />
+        <CampaignList campaigns={campaigns}/>
       </div>
     </div>
   );
