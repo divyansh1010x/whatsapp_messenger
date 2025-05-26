@@ -9,14 +9,19 @@ const sendMessage = async (contacts) => {
     }
 
     const browser = await puppeteer.launch({
-        headless: true, // Must be true for Render
+        headless: true,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
-            '--single-process',
-            '--disable-dev-shm-usage'
+            '--disable-dev-shm-usage',
+            '--single-process'
         ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
+        // Try these common Chrome paths in order
+        executablePath: [
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium-browser',  
+            puppeteer.executablePath()     
+        ].find(path => require('fs').existsSync(path)),
         userDataDir: "./whatsapp-session",
         defaultViewport: null
     });
