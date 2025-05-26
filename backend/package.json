@@ -4,7 +4,6 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "preinstall": "apt-get update && apt-get install -y chromium-browser",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
