@@ -38,7 +38,7 @@ router.post("/start-campaign", async (req, res) => {
     }
 
     try {
-        const response = await axios.post("https://bulk-messenger.onrender.com/api/whatsapp/send", {
+        const response = await axios.post("http://localhost:5000/api/whatsapp/send", {
             contacts: formattedContacts
         });
 
