@@ -1,5 +1,5 @@
 const express = require("express");
-const axios = require("axios");
+const { sendMessage, getStatus } = require("../services/whatsappService");
 
 const router = express.Router();
 
@@ -14,7 +14,8 @@ router.post("/start-campaign", async (req, res) => {
 
     const { contacts, details } = campaignData;
     const messageTemplate = details.messageTemplate;
-    const countryCode = campaignData.countryCode || "91";
+    const rawCountry = campaignData.countryCode || "91";
+    const countryDigits = String(rawCountry).replace(/\D/g, "");
 
     // Convert contacts to required format
     const formattedContacts = contacts
@@ -25,29 +26,36 @@ router.post("/start-campaign", async (req, res) => {
 
     if (!messageData) return null;
 
-    // Remove + from country code and append @c.us
-    const cleanNumber = (campaignData.countryCode || "91").replace(/\+/g, "") + contact.number;
+    const localDigits = String(contact.number || "").replace(/\D/g, "");
+    const fullNumber = localDigits.startsWith(countryDigits)
+      ? localDigits
+      : countryDigits + localDigits;
 
     return {
-      number: cleanNumber,
+      number: fullNumber,
       message: messageData.message
     };
   })
-  .filter(c => c !== null);  
+  .filter(c => c !== null);
+
+    console.log("Formatted contacts:", formattedContacts);
 
     if (formattedContacts.length === 0) {
         return res.status(400).json({ message: "No valid contacts found for this campaign." });
     }
 
     try {
-        const response = await axios.post("http://localhost:5000/api/whatsapp/send", {
-            contacts: formattedContacts
-        });
+        // Verify WhatsApp client readiness just before sending
+        const status = await getStatus();
+        if (!status?.loggedIn) {
+            return res.status(400).json({ message: status?.message || "WhatsApp client not ready. Please log in first." });
+        }
 
-        // Extract sent and failed numbers
-        console.log("Sent numbers:", response.data.sent);
-        const sentCount = response.data?.sent?.length ?? 0;
-        const failedContacts = response?.data?.failed ?? [];
+        const result = await sendMessage(formattedContacts);
+
+        console.log("Sent numbers:", result.sent);
+        const sentCount = result?.sent?.length ?? 0;
+        const failedContacts = result?.failed ?? [];
         const totalContacts = formattedContacts.length;
 
         console.log(`Campaign processed. Sent: ${sentCount}/${totalContacts}`);
@@ -55,15 +63,17 @@ router.post("/start-campaign", async (req, res) => {
         res.json({
             message: `Campaign processed. Sent: ${sentCount}/${totalContacts}`,
             sentCount,
-            failedContacts,  // Send failed contacts separately
+            failedContacts,
             totalContacts,
-            data: response.data
+            data: result
         });
     } catch (error) {
-        console.error("Error sending WhatsApp messages:", error.response?.data || error.message);
+        // Log full error details for debugging in deployment logs
+        console.error("Error sending WhatsApp messages:", error);
         res.status(500).json({
             message: "Failed to send messages",
-            error: error.response?.data || error.message
+            error: error?.message || String(error),
+            stack: error?.stack
         });
     }    
 });
