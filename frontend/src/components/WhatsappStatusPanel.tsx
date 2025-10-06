@@ -8,10 +8,11 @@ type WhatsAppStatus = {
 
 export default function WhatsAppStatusPanel() {
   const [status, setStatus] = useState<WhatsAppStatus | null>(null);
+  const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL;
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch("http://localhost:5000/api/whatsapp/status");
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/status`);
       const data = await res.json();
       setStatus(data);
     } catch (err) {

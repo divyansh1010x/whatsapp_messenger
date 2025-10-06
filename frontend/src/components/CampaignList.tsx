@@ -7,6 +7,7 @@ interface CampaignListProps {
 }
 
 function CampaignList({ campaigns }: CampaignListProps) {
+  const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL;
   const [campaignStatus, setCampaignStatus] = useState<{
     [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] };
   }>({});
@@ -58,7 +59,7 @@ function CampaignList({ campaigns }: CampaignListProps) {
     setCampaignStatus((prev) => ({ ...prev, [id]: { status: 'sending' } }));
 
     try {
-      const response = await fetch('http://localhost:5000/api/campaign/start-campaign', {
+      const response = await fetch(`${API_BASE_URL}/api/campaign/start-campaign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(campaignToSend),
@@ -73,14 +74,23 @@ function CampaignList({ campaigns }: CampaignListProps) {
       const failedContacts = result.failedContacts ?? [];
       const totalContacts = result.totalContacts ?? 0;
 
-      const countryCode = campaignToSend.countryCode;
+      const rawCountryCode = campaignToSend.countryCode || '';
+      const countryDigits = String(rawCountryCode).replace(/\D/g, '');
+      const toLocalNumber = (num: string | undefined) => {
+        const digits = String(num || '').replace(/\D/g, '');
+        if (countryDigits && digits.startsWith(countryDigits)) {
+          return digits.slice(countryDigits.length);
+        }
+        return digits;
+      };
+
       const failedPhoneNumbers = new Set(
-        failedContacts.map((c: Contact) => c.number?.replace(countryCode, ''))
+        failedContacts.map((c: Contact) => toLocalNumber(c.number))
       );
 
       const updatedContacts = campaignToSend.contacts.map((contact: Contact) => ({
         ...contact,
-        count: failedPhoneNumbers.has(contact.number) ? contact.count : (contact.count ?? 0) + 1,
+        count: failedPhoneNumbers.has(toLocalNumber(contact.number)) ? contact.count : (contact.count ?? 0) + 1,
       }));
 
       const updatedCampaigns = campaigns.map((c: Campaign) =>
