@@ -1,89 +1,83 @@
-const puppeteer = require("puppeteer");
+const { Client, LocalAuth } = require("whatsapp-web.js");
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+let client;
+let isReady = false;
+let latestQR = null; // Store latest QR as base64 for frontend
 
-const sendMessage = async (contacts) => {
-    const browser = await puppeteer.launch({
-        headless: false,
-        userDataDir: "./whatsapp-session",
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        defaultViewport: null,
+const getStatus = async () => {
+    if (!client) {
+        return { loggedIn: false, qr: null, message: "Client not initialized yet" };
+    }
+
+    if (isReady) {
+        return { loggedIn: true, message: "WhatsApp is ready!" };
+    }
+
+    return {
+        loggedIn: false,
+        qr: latestQR,
+        message: latestQR ? "Scan the QR code with WhatsApp" : "Waiting for WhatsApp client...",
+    };
+};
+
+const initializeClient = async () => {
+    if (client) return client;
+
+    client = new Client({
+        authStrategy: new LocalAuth({ clientId: "main" }),
+        puppeteer: {
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        },
     });
 
-    const page = await browser.newPage();
+    client.on("qr", async (qr) => {
+        const QRCode = require("qrcode");
+        latestQR = await QRCode.toDataURL(qr); // Convert to base64 image string
+        console.log("📲 New QR code generated for frontend.");
+    });
 
-    console.log("Opening WhatsApp Web...");
-    await page.goto("https://web.whatsapp.com");
+    client.on("authenticated", () => {
+        console.log("✅ WhatsApp authenticated. Session saved.");
+        latestQR = null;
+    });
 
-    try {
-        await page.waitForSelector("#side", { timeout: 60000 });
-        console.log("WhatsApp Web Loaded.");
-    } catch (err) {
-        console.error("Failed to load WhatsApp Web (Timeout waiting for sidebar).");
-        await browser.close();
-        return { sent: [], failed: contacts };
+    client.on("ready", () => {
+        console.log("🚀 WhatsApp client ready.");
+        isReady = true;
+        latestQR = null;
+    });
+
+    client.on("disconnected", (reason) => {
+        console.error("❌ WhatsApp disconnected:", reason);
+        isReady = false;
+    });
+
+    await client.initialize();
+    return client;
+};
+
+const sendMessage = async (contacts) => {
+    if (!isReady) {
+        throw new Error("WhatsApp client not ready. Please log in first.");
     }
 
-    await delay(10000); // Give extra time for session to settle
+    const successList = [];
+    const failedList = [];
 
-    let successList = [];
-    let failedList = [];
-
-    for (let contact of contacts) {
-        const whatsappURL = `https://web.whatsapp.com/send?phone=${contact.number}`;
-        await page.goto(whatsappURL);
-        console.log(`\🚀 Opening chat with ${contact.number}...`);
-        await delay(5000);
-
+    for (const contact of contacts) {
         try {
-            const dialog = await page.$("div[role='dialog']");
-            if (dialog) {
-                console.error(`Invalid number or error opening chat for ${contact.number}`);
-                failedList.push({ number: contact.number });
-                continue;
-            }
-
-            await page.waitForSelector("footer div[contenteditable='true']", { visible: true, timeout: 15000 });
-            const inputBox = await page.$("footer div[contenteditable='true']");
-            if (!inputBox) throw new Error("Message input box not found");
-
-            await inputBox.focus();
-            await delay(500);
-
-            await page.keyboard.type(contact.message);
-            await delay(500);
-
-            await page.keyboard.press("Enter");
-            await delay(3000);
-
-            const messageSent = await page.evaluate(() => {
-                const messages = document.querySelectorAll("div.message-out");
-                return messages.length > 0 && messages[messages.length - 1].innerText.trim().length > 0;
-            });
-
-            if (messageSent) {
-                console.log(`Message successfully sent to ${contact.number}`);
-                successList.push({ number: contact.number });
-            } else {
-                throw new Error("Message was typed but may not have been sent.");
-            }
-
+            const chatId = `${contact.number}@c.us`;
+            await client.sendMessage(chatId, contact.message);
+            successList.push({ number: contact.number });
         } catch (error) {
-            console.error(`Failed to send message to ${contact.number}: ${error.message}`);
+            console.error(`❌ Failed to send to ${contact.number}:`, error.message);
             failedList.push({ number: contact.number });
         }
-
-        await delay(5000);
+        await new Promise((r) => setTimeout(r, 1500)); // small delay between sends
     }
-
-    console.log("\n Messaging process completed!");
-    console.log(`Sent: ${successList.length}, Failed: ${failedList.length}`);
-
-    setTimeout(() => {
-        browser.close();
-    }, 5000);
 
     return { sent: successList, failed: failedList };
 };
 
-module.exports = { sendMessage };
+module.exports = { initializeClient, sendMessage, getStatus };
