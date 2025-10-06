@@ -4,6 +4,7 @@ import CampaignList from './CampaignList';
 import CreateCampaign from './CreateCampaign';
 import { Campaign } from '../types';
 import CampaignReport from './CampaignReport';
+import WhatsAppStatusPanel from './WhatsappStatusPanel';
 
 function Dashboard() {
   const [showCreateCampaign, setShowCreateCampaign] = useState(false);
@@ -35,6 +36,10 @@ function Dashboard() {
     
   return (
     <div className="space-y-8">
+      <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-white/20">
+        <h2 className="text-xl font-semibold mb-4 text-whatsapp-dark">WhatsApp Client Status</h2>
+        <WhatsAppStatusPanel />
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div 
           onClick={() => setShowCreateCampaign(true)}
