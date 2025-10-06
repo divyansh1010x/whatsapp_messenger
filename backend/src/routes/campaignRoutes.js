@@ -18,20 +18,22 @@ router.post("/start-campaign", async (req, res) => {
 
     // Convert contacts to required format
     const formattedContacts = contacts
-        .map(contact => {
-            const messageData = messageTemplate.find(m => m.day === contact.count.toString());
+  .map(contact => {
+    const messageData = details.messageTemplate.find(
+      m => m.day === contact.count.toString()
+    );
 
-            if (!messageData) {
-                console.warn(`No message found for count (day) ${contact.count} - Skipping contact: ${contact.number}`);
-                return null; // Skip contacts with missing messages
-            }
+    if (!messageData) return null;
 
-            return {
-                number: countryCode + contact.number,
-                message: messageData.message
-            };
-        })
-        .filter(contact => contact !== null);
+    // Remove + from country code and append @c.us
+    const cleanNumber = (campaignData.countryCode || "91").replace(/\+/g, "") + contact.number;
+
+    return {
+      number: cleanNumber,
+      message: messageData.message
+    };
+  })
+  .filter(c => c !== null);  
 
     if (formattedContacts.length === 0) {
         return res.status(400).json({ message: "No valid contacts found for this campaign." });
@@ -42,11 +44,10 @@ router.post("/start-campaign", async (req, res) => {
             contacts: formattedContacts
         });
 
-        console.log("WhatsApp API response:", response.data);
-
         // Extract sent and failed numbers
-        const sentCount = response.data?.data?.sent?.length ?? 0;
-        const failedContacts = response.data?.data?.failed ?? [];
+        console.log("Sent numbers:", response.data.sent);
+        const sentCount = response.data?.sent?.length ?? 0;
+        const failedContacts = response?.data?.failed ?? [];
         const totalContacts = formattedContacts.length;
 
         console.log(`Campaign processed. Sent: ${sentCount}/${totalContacts}`);
