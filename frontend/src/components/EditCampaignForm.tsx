@@ -11,6 +11,7 @@ const EditCampaignForm: React.FC = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [startDate, setStartDate] = useState('');
+  const [messageTemplate, setMessageTemplate] = useState<{ day: string; message: string }[]>([]);
 
   useEffect(() => {
     const campaigns: Campaign[] = JSON.parse(localStorage.getItem('campaigns') || '[]');
@@ -21,6 +22,7 @@ const EditCampaignForm: React.FC = () => {
       setContacts(found.contacts);
       setDescription(found.details?.messageTemplate?.[0]?.message || '');
       setStartDate(found.details?.scheduledDate || '');
+      setMessageTemplate(found.details?.messageTemplate || []);
     }
   }, [campaignId]);
 
@@ -39,6 +41,21 @@ const EditCampaignForm: React.FC = () => {
     setContacts(updated);
   };
 
+  const handleMessageChange = (index: number, field: 'day' | 'message', value: string) => {
+    const updated = [...messageTemplate];
+    updated[index] = { ...updated[index], [field]: value };
+    setMessageTemplate(updated);
+  };
+
+  const handleAddMessage = () => {
+    setMessageTemplate([...messageTemplate, { day: `${messageTemplate.length + 1}`, message: '' }]);
+  };
+
+  const handleRemoveMessage = (index: number) => {
+    const updated = messageTemplate.filter((_, i) => i !== index);
+    setMessageTemplate(updated);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!campaign) return;
@@ -50,7 +67,7 @@ const EditCampaignForm: React.FC = () => {
       details: {
         ...campaign.details,
         scheduledDate: startDate,
-        messageTemplate: [{ day: 'Day 1', message: description }],
+        messageTemplate: messageTemplate,
       },
     };
 
@@ -64,14 +81,16 @@ const EditCampaignForm: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow">
-      <h1 className="text-xl font-semibold mb-4">Edit Campaign</h1>
-      <button
-            onClick={() => (window.location.href = '/')}
-            className="flex items-center text-sm text-gray-600 hover:text-whatsapp-primary"
-          >
-            <ArrowLeftCircle className="h-5 w-5 mr-1" />
-            Back to Dashboard
-      </button>
+      <div className="mb-6">
+        <button
+          onClick={() => (window.location.href = '/')}
+          className="flex items-center px-4 py-2 text-sm text-gray-600 hover:text-whatsapp-primary border border-gray-300 rounded-lg hover:border-whatsapp-primary transition-colors mb-4"
+        >
+          <ArrowLeftCircle className="h-4 w-4 mr-2" />
+          Back to Dashboard
+        </button>
+        <h1 className="text-xl font-semibold">Edit Campaign</h1>
+      </div>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block font-medium">Campaign Name</label>
@@ -118,8 +137,43 @@ const EditCampaignForm: React.FC = () => {
           </button>
         </div>
 
+        <div>
+          <label className="block font-medium mb-2">Message Templates</label>
+          {messageTemplate.map((template, index) => (
+            <div key={index} className="flex items-center gap-2 mb-2">
+              <input
+                type="text"
+                placeholder="Day"
+                className="w-20 border p-2 rounded"
+                value={template.day}
+                onChange={(e) => handleMessageChange(index, 'day', e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Message"
+                className="flex-1 border p-2 rounded"
+                value={template.message}
+                onChange={(e) => handleMessageChange(index, 'message', e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => handleRemoveMessage(index)}
+                className="text-red-500 text-sm"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={handleAddMessage}
+            className="text-blue-600 text-sm mt-2"
+          >
+            + Add Message Template
+          </button>
+        </div>
+
         <button
-          onClick={() => window.location.href = `/`}
           type="submit"
           className="bg-whatsapp-primary text-white px-4 py-2 rounded hover:bg-whatsapp-secondary"
         >

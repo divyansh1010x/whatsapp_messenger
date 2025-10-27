@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, MessageSquare, Upload } from 'lucide-react';
+import { Calendar, MessageSquare, Upload, Info } from 'lucide-react';
 import { CampaignDetails } from '../types';
 
 interface CampaignDetailsFormProps {
@@ -8,8 +8,8 @@ interface CampaignDetailsFormProps {
 }
 
 function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
-  const [scheduledDate, setScheduledDate] = useState('');
-  const [messageTemplate, setMessageTemplate] = useState('');
+  // scheduledDate is not a user input anymore; set it automatically when saving
+  const [messageTemplate, setMessageTemplate] = useState("");
   const [csvData, setCsvData] = useState<{ day: string; message: string }[]>([]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,9 +34,34 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    let finalMessageTemplate;
+    
+    if (csvData.length > 0) {
+      // Use CSV data as base
+      finalMessageTemplate = [...csvData];
+      
+      // If manual text exists, append it as the last day
+      if (messageTemplate.trim()) {
+        const lastDayNumber = csvData.length > 0 ? 
+          Math.max(...csvData.map(item => parseInt(item.day) || 0)) + 1 : 1;
+        finalMessageTemplate.push({
+          day: lastDayNumber.toString(),
+          message: messageTemplate.trim(),
+        });
+      }
+    } else if (messageTemplate.trim()) {
+      // Convert manual text to template format (day 1 gets the message)
+      finalMessageTemplate = [{ day: "1", message: messageTemplate.trim() }];
+    } else {
+      alert("Please either upload a CSV template or enter a message template");
+      return;
+    }
+
+    // Use current date-time as scheduledDate (ISO string)
     onSave({
-      scheduledDate,
-      messageTemplate: csvData, // Store as an array instead of a string
+      scheduledDate: new Date().toISOString(),
+      messageTemplate: finalMessageTemplate,
     });
   };   
 
@@ -52,24 +77,7 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
       <h2 className="text-xl font-semibold mb-6 text-whatsapp-dark">Campaign Details</h2>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Scheduled Date
-          </label>
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Calendar className="h-5 w-5 text-whatsapp-secondary" />
-            </div>
-            <input
-              type="datetime-local"
-              value={scheduledDate}
-              onChange={(e) => setScheduledDate(e.target.value)}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-whatsapp-primary focus:border-transparent"
-              required
-            />
-          </div>
-        </div>
-
+        {/* Removed Scheduled Date input, will be set on submit */}
         <div className="space-y-4">
           <label className="block text-sm font-medium text-gray-700">
             Message Template
@@ -96,10 +104,24 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
 
           {csvData.length > 0 && (
               <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-whatsapp-light/30 px-3 py-2 border-b border-gray-200">
+                <div className="bg-whatsapp-light/30 px-3 py-2 border-b border-gray-200 flex items-center justify-between">
                   <h3 className="text-sm font-medium text-whatsapp-dark">
-                    Message Template Preview (showing top {Math.min(csvData.length, 10)} of {csvData.length})
+                    CSV Template Active (showing top {Math.min(csvData.length, 10)} of {csvData.length})
                   </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCsvData([]);
+                      // Clear the file input so same file can be uploaded again
+                      const fileInput = document.getElementById('template-upload') as HTMLInputElement;
+                      if (fileInput) {
+                        fileInput.value = '';
+                      }
+                    }}
+                    className="text-red-600 hover:text-red-800 text-sm font-medium"
+                  >
+                    Clear CSV
+                  </button>
                 </div>
                 <div className="p-4 space-y-2 text-sm text-gray-700">
                   {csvData.slice(0, 10).map((item, index) => (
@@ -121,10 +143,19 @@ function CampaignDetailsForm({ onSave, onBack }: CampaignDetailsFormProps) {
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <MessageSquare className="h-5 w-5 text-whatsapp-secondary" />
             </div>
+            <div className="absolute top-3 left-4 flex items-center">
+              <div className="relative group">
+                <Info className="h-4 w-4 text-gray-400 cursor-help" />
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+                  If CSV is uploaded, this text will be added as the last day
+                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                </div>
+              </div>
+            </div>
             <textarea
               value={messageTemplate}
               onChange={(e) => setMessageTemplate(e.target.value)}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-whatsapp-primary focus:border-transparent"
+              className="block w-full pl-16 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-whatsapp-primary focus:border-transparent"
               rows={4}
               placeholder="Enter your message template here..."
               required={!csvData.length}

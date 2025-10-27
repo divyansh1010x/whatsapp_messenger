@@ -179,10 +179,19 @@ function CampaignList({ campaigns }: CampaignListProps) {
               )}
 
               {campaignStatus[campaign.id]?.status === 'failed' && (
-                <div className="flex items-center text-red-600">
-                  <XCircle className="h-5 w-5 mr-1" />
-                  Failed
-                </div>
+                <>
+                  <div className="flex items-center text-red-600">
+                    <XCircle className="h-5 w-5 mr-1" />
+                    Failed
+                  </div>
+                  <button
+                    onClick={() => handleStart(campaign.id)}
+                    className="ml-2 flex items-center px-3 py-1 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-xs"
+                    title="Retry Campaign"
+                  >
+                    Retry
+                  </button>
+                </>
               )}
 
               <button

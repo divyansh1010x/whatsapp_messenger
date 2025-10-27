@@ -35,12 +35,20 @@ export default function WhatsAppStatusPanel() {
   if (status.qr) {
     return (
       <div className="flex flex-col items-center space-y-2">
-        <p className="text-yellow-600 font-semibold">📱 Scan this QR code with WhatsApp</p>
+        <p className="text-yellow-600 font-semibold">Scan the QR code with your WhatsApp app to connect this device.</p>
         <img src={status.qr} alt="WhatsApp QR Code" className="w-48 h-48" />
-        {status.message && <p className="text-gray-600">{status.message}</p>}
+        <p className="text-gray-600">After scanning, please wait a moment while we securely connect your account.</p>
       </div>
     );
   }
 
-  return <p className="text-gray-600 font-medium">{status.message || "⏳ Waiting for WhatsApp client..."}</p>;
+  // Show loading bar when QR is scanned but not ready yet
+  return (
+    <div className="flex flex-col items-center space-y-4">
+      <div className="flex items-center justify-center mb-2">
+        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-whatsapp-primary mr-2"></div>
+        <span className="text-sm text-gray-600">Connecting...</span>
+      </div>
+    </div>
+  );
 }
