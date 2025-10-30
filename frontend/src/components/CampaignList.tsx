@@ -1,6 +1,7 @@
 import { Calendar, Send, CheckCircle, XCircle, Users, Loader, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Campaign, Contact } from '../types';
+import { useNavigate } from 'react-router-dom';
 
 interface CampaignListProps {
   campaigns: Campaign[];
@@ -11,6 +12,7 @@ function CampaignList({ campaigns }: CampaignListProps) {
   const [campaignStatus, setCampaignStatus] = useState<{
     [key: string]: { status: string; sent?: number; total?: number; failedContacts?: string[] };
   }>({});
+  const navigate = useNavigate();
 
   useEffect(() => {
     const today = new Date().toDateString();
@@ -195,7 +197,7 @@ function CampaignList({ campaigns }: CampaignListProps) {
               )}
 
               <button
-                onClick={() => window.location.href = `/navigate?id=${campaign.id}`}
+                onClick={() => navigate('/navigate', { state: { campaign } })}
                 className="p-2 hover:bg-gray-100 rounded-full"
                 title="Edit Campaign"
                 >

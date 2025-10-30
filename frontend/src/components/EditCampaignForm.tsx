@@ -1,30 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { Campaign, Contact } from '../types';
 import { XCircle, ArrowLeftCircle} from 'lucide-react';
 
 const EditCampaignForm: React.FC = () => {
-  const [searchParams] = useSearchParams();
-  const campaignId = searchParams.get('id');
-  const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [messageTemplate, setMessageTemplate] = useState<{ day: string; message: string }[]>([]);
+  const location = useLocation();
+  const campaign: Campaign | null = location.state?.campaign ?? null;
+  const [contacts, setContacts] = useState<Contact[]>(campaign?.contacts || []);
+  const [name, setName] = useState(campaign?.name || '');
+  const [description, setDescription] = useState(campaign?.details?.messageTemplate?.[0]?.message || '');
+  const [startDate, setStartDate] = useState(campaign?.details?.scheduledDate || '');
+  const [messageTemplate, setMessageTemplate] = useState<{ day: string; message: string }[]>(campaign?.details?.messageTemplate || []);
 
   useEffect(() => {
-    const campaigns: Campaign[] = JSON.parse(localStorage.getItem('campaigns') || '[]');
-    const found = campaigns.find(c => c.id === campaignId);
-    if (found) {
-      setCampaign(found);
-      setName(found.name);
-      setContacts(found.contacts);
-      setDescription(found.details?.messageTemplate?.[0]?.message || '');
-      setStartDate(found.details?.scheduledDate || '');
-      setMessageTemplate(found.details?.messageTemplate || []);
+    if (campaign) {
+      setName(campaign.name);
+      setContacts(campaign.contacts);
+      setDescription(campaign.details?.messageTemplate?.[0]?.message || '');
+      setStartDate(campaign.details?.scheduledDate || '');
+      setMessageTemplate(campaign.details?.messageTemplate || []);
     }
-  }, [campaignId]);
+  }, [campaign]);
 
   const handleContactChange = (index: number, field: keyof Contact, value: string) => {
     const updated = [...contacts];
@@ -72,12 +68,12 @@ const EditCampaignForm: React.FC = () => {
     };
 
     const campaigns: Campaign[] = JSON.parse(localStorage.getItem('campaigns') || '[]');
-    const updatedCampaigns = campaigns.map(c => (c.id === campaign.id ? updatedCampaign : c));
+    const updatedCampaigns = campaigns.map(c => (c.name === campaign.name ? updatedCampaign : c));
     localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
     alert('Campaign updated successfully.');
   };
 
-  if (!campaign) return <div className="text-center py-10">Loading...</div>;
+  if (!campaign) return <div className="text-center py-10">No campaign loaded. Please return to the Dashboard.</div>;
 
   return (
     <div className="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow">
