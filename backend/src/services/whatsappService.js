@@ -267,12 +267,53 @@ const sendMessage = async (contacts) => {
                 const errorStr = String(sendError);
                 const errorMsg = sendError.message || errorStr;
                 
-                // markedUnread/sendSeen errors happen AFTER the message is sent
-                // So if we get this error, the message was likely sent successfully
+                // markedUnread/sendSeen errors - need to verify message was actually sent
                 if (errorStr.includes('markedUnread') || errorStr.includes('sendSeen')) {
-                    console.log(`⚠️ markedUnread error for ${contact.number}, but message was likely sent (this error occurs after sending)`);
-                    console.log(`✅ Treating as success - message should have been delivered`);
-                    successList.push({ number: contact.number });
+                    console.log(`⚠️ markedUnread error for ${contact.number} - verifying if message was actually sent...`);
+                    
+                    // Wait a moment for message to appear in chat
+                    await new Promise(r => setTimeout(r, 2000));
+                    
+                    // Verify message was sent by checking chat
+                    try {
+                        let verifyChat = chat;
+                        if (!verifyChat) {
+                            verifyChat = await Promise.race([
+                                client.getChatById(chatId),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error("Chat lookup timeout")), 5000))
+                            ]);
+                        }
+                        
+                        // Get recent messages to check if ours was sent
+                        const messages = await Promise.race([
+                            verifyChat.fetchMessages({ limit: 10 }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error("Message fetch timeout")), 5000))
+                        ]);
+                        
+                        // Check if our message is in the recent messages
+                        // Look for a message with matching body text sent by us
+                        const ourMessage = messages.find(m => {
+                            const isOurMessage = m.fromMe && 
+                                (m.body === contact.message || 
+                                 m.body?.includes(contact.message) ||
+                                 contact.message.includes(m.body));
+                            return isOurMessage;
+                        });
+                        
+                        if (ourMessage) {
+                            const messageId = ourMessage.id.id || ourMessage.id._serialized || ourMessage.id || 'unknown';
+                            console.log(`✅ Verified: Message was sent to ${contact.number} (Message ID: ${messageId})`);
+                            successList.push({ number: contact.number });
+                        } else {
+                            console.error(`❌ markedUnread error but message NOT found in chat - send likely failed`);
+                            throw new Error("Message not found in chat after markedUnread error");
+                        }
+                    } catch (verifyError) {
+                        console.error(`❌ Could not verify message send for ${contact.number}: ${verifyError.message}`);
+                        console.log(`🔄 Will retry sending...`);
+                        // Re-throw to trigger retry logic
+                        throw sendError;
+                    }
                 } else {
                     // Different error - re-throw to be handled by outer catch
                     throw sendError;
@@ -283,29 +324,18 @@ const sendMessage = async (contacts) => {
             const errorMsg = error.message || String(error);
             const errorString = String(error);
             
-            // Handle markedUnread error specifically - this happens when chat is undefined
+            // Handle markedUnread error specifically - retry with different approach
             if (errorMsg.includes('markedUnread') || errorString.includes('markedUnread')) {
-                console.error(`❌ markedUnread error for ${contact.number} - retrying with chat creation...`);
+                console.error(`❌ markedUnread error for ${contact.number} - retrying with alternative method...`);
                 try {
-                    // Wait a moment
-                    await new Promise(r => setTimeout(r, 1500));
+                    // Wait a moment before retry
+                    await new Promise(r => setTimeout(r, 2000));
                     
-                    // Force get/create chat first
-                    let retryChat;
-                    try {
-                        retryChat = await Promise.race([
-                            client.getChatById(chatId),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error("Chat lookup failed")), 8000))
-                        ]);
-                    } catch {
-                        // If chat doesn't exist, send a message to create it
-                        // First message to a new number creates the chat
-                        console.log(`Creating new chat for ${contact.number}...`);
-                    }
-                    
-                    // Retry sending - if chat exists, use it; otherwise use client method
+                    // Try sending using the page directly to bypass markedUnread
+                    // Use a simpler approach - just retry with client.sendMessage
+                    console.log(`🔄 Retry attempt 1: Using client.sendMessage...`);
                     const retryResult = await Promise.race([
-                        retryChat ? retryChat.sendMessage(contact.message) : client.sendMessage(chatId, contact.message),
+                        client.sendMessage(chatId, contact.message),
                         new Promise((_, reject) =>
                             setTimeout(() => reject(new Error("Retry timeout")), 30000)
                         )
@@ -316,13 +346,26 @@ const sendMessage = async (contacts) => {
                         console.log(`✅ Successfully sent to ${contact.number} on retry (Message ID: ${messageId})`);
                         successList.push({ number: contact.number });
                     } else {
-                        // Even without ID, if no error, consider success
-                        console.log(`✅ Message sent to ${contact.number} on retry (no ID but no error)`);
-                        successList.push({ number: contact.number });
+                        // Verify by checking chat
+                        await new Promise(r => setTimeout(r, 2000));
+                        try {
+                            const verifyChat = await client.getChatById(chatId);
+                            const messages = await verifyChat.fetchMessages({ limit: 5 });
+                            const found = messages.find(m => m.fromMe && (m.body === contact.message || contact.message.includes(m.body)));
+                            if (found) {
+                                console.log(`✅ Verified message sent on retry to ${contact.number}`);
+                                successList.push({ number: contact.number });
+                            } else {
+                                throw new Error("Message not found after retry");
+                            }
+                        } catch {
+                            console.error(`❌ Could not verify retry send for ${contact.number}`);
+                            throw new Error("Retry failed - message not verified");
+                        }
                     }
                 } catch (retryError) {
                     const retryErrorMsg = retryError.message || String(retryError);
-                    console.error(`❌ Retry also failed for ${contact.number}: ${retryErrorMsg}`);
+                    console.error(`❌ Retry failed for ${contact.number}: ${retryErrorMsg}`);
                     failedList.push({ number: contact.number, error: `markedUnread error - retry failed: ${retryErrorMsg}` });
                 }
             } else if (errorMsg.includes('timeout')) {
