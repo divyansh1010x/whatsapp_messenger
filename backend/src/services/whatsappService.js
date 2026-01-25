@@ -84,15 +84,15 @@ const sendMessage = async (contacts) => {
         const chatId = `${contact.number}@c.us`;
 
         try {
-            // ⏱️ Hard timeout protection (VERY IMPORTANT)
-            const sendPromise = client.sendMessage(chatId, contact.message).catch(err => {
-                // If it's a "markedUnread" error, the message likely still sent
-                if (err.message?.includes('markedUnread') || err.toString()?.includes('markedUnread')) {
-                    console.warn(`⚠️ Message sent to ${contact.number} but post-send operation failed`);
-                    return { partialSuccess: true };
-                }
-                throw err;
-            });
+            // Get the chat object first to verify it exists
+            const chat = await client.getChatById(chatId);
+            
+            if (!chat) {
+                throw new Error("Chat not found or cannot be accessed");
+            }
+
+            // ⏱️ Hard timeout protection
+            const sendPromise = client.sendMessage(chatId, contact.message);
 
             const result = await Promise.race([
                 sendPromise,
@@ -101,15 +101,10 @@ const sendMessage = async (contacts) => {
                 )
             ]);
 
-            // Check if message was sent (either fully or partially)
-            if (result?.partialSuccess || (result && result.id)) {
-                if (result.id) {
-                    console.log(`✅ Sent to ${contact.number} (Message ID: ${result.id.id})`);
-                    successList.push({ number: contact.number, messageId: result.id.id });
-                } else {
-                    console.log(`✅ Sent to ${contact.number} (partial)`);
-                    successList.push({ number: contact.number, partial: true });
-                }
+            // Message sent successfully
+            if (result && result.id) {
+                console.log(`✅ Sent to ${contact.number} (Message ID: ${result.id.id})`);
+                successList.push({ number: contact.number, messageId: result.id.id });
             } else {
                 console.log(`✅ Sent to ${contact.number}`);
                 successList.push({ number: contact.number });
@@ -120,7 +115,7 @@ const sendMessage = async (contacts) => {
             failedList.push({ number: contact.number, error: error.message });
         }
 
-        // ⚠️ Keep delay small but safe
+        // ⚠️ Keep delay to avoid rate limiting
         await new Promise(r => setTimeout(r, 1200));
     }
 
