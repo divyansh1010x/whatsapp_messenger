@@ -37,9 +37,8 @@ const initializeClient = async () => {
           "--disable-web-security"
         ]
       },
-      webVersion: "2.2409.2",
       webVersionCache: {
-        type: "remote"
+        type: "local"
       },
       messageRingtonePath: null,
       // Disable auto-download and other features that might cause chat object issues
