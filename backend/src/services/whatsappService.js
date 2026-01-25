@@ -167,35 +167,40 @@ const sendMessage = async (contacts) => {
                 chat = null;
             }
 
-            // Send message - use chat.sendMessage if available, otherwise use client.sendMessage
+            // Send message - always use client.sendMessage
+            // The markedUnread error happens AFTER message is sent, so we'll treat it as success
             let result;
-            if (chat) {
-                // Use chat's sendMessage method which handles markedUnread better
-                result = await Promise.race([
-                    chat.sendMessage(contact.message),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Send timeout after 30 seconds")), 30000)
-                    )
-                ]);
-            } else {
-                // Use client.sendMessage - chat will be created automatically
+            try {
                 result = await Promise.race([
                     client.sendMessage(chatId, contact.message),
                     new Promise((_, reject) =>
                         setTimeout(() => reject(new Error("Send timeout after 30 seconds")), 30000)
                     )
                 ]);
-            }
-            
-            // Verify we got a valid result
-            if (result && result.id) {
-                const messageId = result.id.id || result.id._serialized || result.id || 'unknown';
-                console.log(`✅ Successfully sent to ${contact.number} (Message ID: ${messageId})`);
+                
+                // Success - message sent
+                if (result && result.id) {
+                    const messageId = result.id.id || result.id._serialized || result.id || 'unknown';
+                    console.log(`✅ Successfully sent to ${contact.number} (Message ID: ${messageId})`);
+                } else {
+                    console.log(`✅ Message sent to ${contact.number} (no ID returned but no error)`);
+                }
                 successList.push({ number: contact.number });
-            } else {
-                // Even if no ID, if no error was thrown, consider it success
-                console.log(`✅ Message sent to ${contact.number} (no ID returned but no error)`);
-                successList.push({ number: contact.number });
+                
+            } catch (sendError) {
+                const errorStr = String(sendError);
+                const errorMsg = sendError.message || errorStr;
+                
+                // markedUnread/sendSeen errors happen AFTER the message is sent
+                // So if we get this error, the message was likely sent successfully
+                if (errorStr.includes('markedUnread') || errorStr.includes('sendSeen')) {
+                    console.log(`⚠️ markedUnread error for ${contact.number}, but message was likely sent (this error occurs after sending)`);
+                    console.log(`✅ Treating as success - message should have been delivered`);
+                    successList.push({ number: contact.number });
+                } else {
+                    // Different error - re-throw to be handled by outer catch
+                    throw sendError;
+                }
             }
 
         } catch (error) {
