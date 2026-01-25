@@ -36,7 +36,10 @@ const initializeClient = async () => {
       webVersion: "2.2409.2",
       webVersionCache: {
         type: "remote"
-      }
+      },
+      messageRingtonePath: null,
+      // Disable auto-download and other features that might cause chat object issues
+      restartOnCrash: true
     });
 
 
@@ -79,21 +82,39 @@ const sendMessage = async (contacts) => {
 
         try {
             // ⏱️ Hard timeout protection (VERY IMPORTANT)
-            const sendPromise = client.sendMessage(chatId, contact.message);
+            const sendPromise = client.sendMessage(chatId, contact.message).catch(err => {
+                // If it's a "markedUnread" error, the message likely still sent
+                if (err.message?.includes('markedUnread') || err.toString()?.includes('markedUnread')) {
+                    console.warn(`⚠️ Message sent to ${contact.number} but post-send operation failed`);
+                    return { partialSuccess: true };
+                }
+                throw err;
+            });
 
-            await Promise.race([
+            const result = await Promise.race([
                 sendPromise,
                 new Promise((_, reject) =>
                     setTimeout(() => reject(new Error("Send timeout")), 15000)
                 )
             ]);
 
-            console.log(`✅ Sent to ${contact.number}`);
-            successList.push({ number: contact.number });
+            // Check if message was sent (either fully or partially)
+            if (result?.partialSuccess || (result && result.id)) {
+                if (result.id) {
+                    console.log(`✅ Sent to ${contact.number} (Message ID: ${result.id.id})`);
+                    successList.push({ number: contact.number, messageId: result.id.id });
+                } else {
+                    console.log(`✅ Sent to ${contact.number} (partial)`);
+                    successList.push({ number: contact.number, partial: true });
+                }
+            } else {
+                console.log(`✅ Sent to ${contact.number}`);
+                successList.push({ number: contact.number });
+            }
 
         } catch (error) {
             console.error(`❌ Failed to send to ${contact.number}: ${error.message}`);
-            failedList.push({ number: contact.number });
+            failedList.push({ number: contact.number, error: error.message });
         }
 
         // ⚠️ Keep delay small but safe

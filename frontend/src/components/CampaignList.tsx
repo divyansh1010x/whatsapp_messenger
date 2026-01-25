@@ -102,7 +102,7 @@ function CampaignList({ campaigns }: CampaignListProps) {
               contacts: updatedContacts,
               sentMessages: sentCount,
               totalMessages: totalContacts,
-              status: 'completed',
+              status: sentCount === 0 ? 'failed' : 'completed',
               todaysFailedMessages: failedContacts,
             }
           : c
@@ -113,7 +113,7 @@ function CampaignList({ campaigns }: CampaignListProps) {
       setCampaignStatus((prev) => ({
         ...prev,
         [id]: {
-          status: 'completed',
+          status: sentCount === 0 ? 'failed' : 'completed',
           sent: sentCount,
           total: totalContacts,
           failedContacts: failedContacts.map((fc: Contact) => fc.number),
