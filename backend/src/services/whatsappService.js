@@ -243,38 +243,31 @@ const sendMessage = async (contacts) => {
                 chat = null;
             }
 
-            // Send message - patch sendSeen to prevent markedUnread error
+            // Send message - use chat.sendMessage if available, otherwise client.sendMessage
+            // Use shorter timeout and better error handling
             let result;
+            const sendTimeout = 20000; // 20 seconds
+            
             try {
-                // Get the page and patch sendSeen function before sending
-                const page = client.pupPage;
-                
-                // Patch the sendSeen function to catch markedUnread errors
-                await page.evaluate(() => {
-                    if (window.WWebJS && window.WWebJS.sendSeen) {
-                        const originalSendSeen = window.WWebJS.sendSeen;
-                        window.WWebJS.sendSeen = async function(chatId) {
-                            try {
-                                return await originalSendSeen.call(this, chatId);
-                            } catch (error) {
-                                // Ignore markedUnread errors
-                                if (error.message && error.message.includes('markedUnread')) {
-                                    console.log('Ignored markedUnread error in sendSeen');
-                                    return; // Return successfully even if error
-                                }
-                                throw error; // Re-throw other errors
-                            }
-                        };
-                    }
-                });
-                
-                // Now send the message
-                result = await Promise.race([
-                    client.sendMessage(chatId, contact.message),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Send timeout after 30 seconds")), 30000)
-                    )
-                ]);
+                if (chat) {
+                    // Use chat's sendMessage - might handle markedUnread better
+                    console.log(`📤 Sending via chat.sendMessage...`);
+                    result = await Promise.race([
+                        chat.sendMessage(contact.message),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error(`Send timeout after ${sendTimeout/1000} seconds`)), sendTimeout)
+                        )
+                    ]);
+                } else {
+                    // Use client.sendMessage
+                    console.log(`📤 Sending via client.sendMessage...`);
+                    result = await Promise.race([
+                        client.sendMessage(chatId, contact.message),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error(`Send timeout after ${sendTimeout/1000} seconds`)), sendTimeout)
+                        )
+                    ]);
+                }
                 
                 // Success - message sent
                 if (result && result.id) {
@@ -290,8 +283,28 @@ const sendMessage = async (contacts) => {
                 const errorStr = String(sendError);
                 const errorMsg = sendError.message || errorStr;
                 
-                // Even with patching, markedUnread might still occur
-                if (errorStr.includes('markedUnread') || errorStr.includes('sendSeen')) {
+                // Handle timeout specifically
+                if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
+                    console.error(`⏱️ Send timeout for ${contact.number} - message may still be sending`);
+                    // Wait a bit and check if message was sent despite timeout
+                    await new Promise(r => setTimeout(r, 3000));
+                    
+                    try {
+                        const verifyChat = await client.getChatById(chatId);
+                        const messages = await verifyChat.fetchMessages({ limit: 5 });
+                        const found = messages.find(m => m.fromMe && (m.body === contact.message || contact.message.includes(m.body)));
+                        
+                        if (found) {
+                            console.log(`✅ Message found after timeout - send succeeded`);
+                            successList.push({ number: contact.number });
+                        } else {
+                            throw new Error("Timeout and message not found");
+                        }
+                    } catch (verifyError) {
+                        console.error(`❌ Timeout and could not verify: ${verifyError.message}`);
+                        throw sendError; // Re-throw to trigger retry
+                    }
+                } else if (errorStr.includes('markedUnread') || errorStr.includes('sendSeen')) {
                     console.log(`⚠️ markedUnread error occurred - checking if message was sent anyway...`);
                     
                     // Wait and verify
