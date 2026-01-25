@@ -66,15 +66,34 @@ const sendMessage = async (contacts) => {
     const failedList = [];
 
     for (const contact of contacts) {
+        const chatId = `${contact.number}@c.us`;
+
         try {
-            const chatId = `${contact.number}@c.us`;
+            // 1️⃣ Check if number exists on WhatsApp
+            const isRegistered = await client.isRegisteredUser(chatId);
+            if (!isRegistered) {
+                console.log(`❌ ${contact.number} is not on WhatsApp`);
+                failedList.push({ number: contact.number, reason: "Not on WhatsApp" });
+                continue;
+            }
+
+            // 2️⃣ Force chat creation (IMPORTANT)
+            await client.sendMessage(chatId, " "); // invisible bootstrap
+            await new Promise(r => setTimeout(r, 1000));
+
+            // 3️⃣ Send actual message
             await client.sendMessage(chatId, contact.message);
+
             successList.push({ number: contact.number });
+            console.log(`✅ Sent to ${contact.number}`);
+
         } catch (error) {
             console.error(`❌ Failed to send to ${contact.number}:`, error.message);
-            failedList.push({ number: contact.number });
+            failedList.push({ number: contact.number, reason: error.message });
         }
-        await new Promise((r) => setTimeout(r, 1500)); // small delay between sends
+
+        // 4️⃣ Rate-limit (avoid ban)
+        await new Promise(r => setTimeout(r, 2000));
     }
 
     return { sent: successList, failed: failedList };
