@@ -88,14 +88,14 @@ const sendMessage = async (contacts) => {
         const chatId = `${contact.number}@c.us`;
 
         try {
-            // Send message with timeout protection
+            // Send message with timeout protection (increased to 45 seconds)
             let messageSent = false;
             
             try {
                 const result = await Promise.race([
                     client.sendMessage(chatId, contact.message),
                     new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Send timeout")), 15000)
+                        setTimeout(() => reject(new Error("Send timeout")), 60000)
                     )
                 ]);
                 messageSent = true;
