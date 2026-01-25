@@ -243,31 +243,37 @@ const sendMessage = async (contacts) => {
                 chat = null;
             }
 
-            // Send message - use chat.sendMessage if available, otherwise client.sendMessage
-            // Use shorter timeout and better error handling
+            // Send message - record timestamp BEFORE sending to verify new messages
             let result;
             const sendTimeout = 20000; // 20 seconds
+            const sendStartTime = Date.now(); // Record when we START sending
+            
+            // Get messages before sending to compare later
+            let messagesBefore = [];
+            try {
+                const chatBefore = await client.getChatById(chatId);
+                messagesBefore = await chatBefore.fetchMessages({ limit: 5 });
+            } catch (e) {
+                // Ignore if we can't get messages before
+            }
             
             try {
+                let sendPromise;
                 if (chat) {
-                    // Use chat's sendMessage - might handle markedUnread better
                     console.log(`📤 Sending via chat.sendMessage...`);
-                    result = await Promise.race([
-                        chat.sendMessage(contact.message),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error(`Send timeout after ${sendTimeout/1000} seconds`)), sendTimeout)
-                        )
-                    ]);
+                    sendPromise = chat.sendMessage(contact.message);
                 } else {
-                    // Use client.sendMessage
                     console.log(`📤 Sending via client.sendMessage...`);
-                    result = await Promise.race([
-                        client.sendMessage(chatId, contact.message),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error(`Send timeout after ${sendTimeout/1000} seconds`)), sendTimeout)
-                        )
-                    ]);
+                    sendPromise = client.sendMessage(chatId, contact.message);
                 }
+                
+                // Race between send and timeout
+                result = await Promise.race([
+                    sendPromise,
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error(`Send timeout after ${sendTimeout/1000} seconds`)), sendTimeout)
+                    )
+                ]);
                 
                 // Success - message sent
                 if (result && result.id) {
@@ -290,14 +296,27 @@ const sendMessage = async (contacts) => {
                     await new Promise(r => setTimeout(r, 3000));
                     
                     try {
+                        const beforeTimeout = Date.now();
                         const verifyChat = await client.getChatById(chatId);
-                        const messages = await verifyChat.fetchMessages({ limit: 5 });
-                        const found = messages.find(m => m.fromMe && (m.body === contact.message || contact.message.includes(m.body)));
+                        const messages = await verifyChat.fetchMessages({ limit: 10 });
+                        
+                        // Find message with exact match and recent timestamp
+                        const found = messages.find(m => {
+                            if (!m.fromMe) return false;
+                            if (m.body !== contact.message) return false; // EXACT match
+                            
+                            const messageTime = m.timestamp * 1000;
+                            const timeDiff = beforeTimeout - messageTime;
+                            return timeDiff < 25000 && timeDiff > -5000; // Within 25 seconds (timeout + buffer)
+                        });
                         
                         if (found) {
-                            console.log(`✅ Message found after timeout - send succeeded`);
+                            const messageId = found.id.id || found.id._serialized || found.id || 'unknown';
+                            console.log(`✅ Message found after timeout - send succeeded (Message ID: ${messageId})`);
                             successList.push({ number: contact.number });
                         } else {
+                            console.error(`❌ Timeout and NEW message not found`);
+                            console.error(`   Looking for: "${contact.message}"`);
                             throw new Error("Timeout and message not found");
                         }
                     } catch (verifyError) {
@@ -305,21 +324,55 @@ const sendMessage = async (contacts) => {
                         throw sendError; // Re-throw to trigger retry
                     }
                 } else if (errorStr.includes('markedUnread') || errorStr.includes('sendSeen')) {
-                    console.log(`⚠️ markedUnread error occurred - checking if message was sent anyway...`);
+                    console.log(`⚠️ markedUnread error occurred - verifying if NEW message was actually sent...`);
                     
-                    // Wait and verify
-                    await new Promise(r => setTimeout(r, 3000));
+                    // Wait for message to appear
+                    await new Promise(r => setTimeout(r, 4000));
                     
                     try {
                         const verifyChat = await client.getChatById(chatId);
-                        const messages = await verifyChat.fetchMessages({ limit: 5 });
-                        const found = messages.find(m => m.fromMe && (m.body === contact.message || contact.message.includes(m.body)));
+                        const messagesAfter = await verifyChat.fetchMessages({ limit: 10 });
+                        
+                        // Find message that:
+                        // 1. Was sent by us (fromMe)
+                        // 2. Has exact body match
+                        // 3. Was NOT in messagesBefore (it's a NEW message)
+                        // 4. Was sent after sendStartTime
+                        const messageIdsBefore = new Set(messagesBefore.map(m => m.id._serialized || m.id.id || String(m.id)));
+                        
+                        const found = messagesAfter.find(m => {
+                            if (!m.fromMe) return false;
+                            if (m.body !== contact.message) return false; // EXACT match only
+                            
+                            // Check if this is a NEW message (not in messagesBefore)
+                            const messageId = m.id._serialized || m.id.id || String(m.id);
+                            if (messageIdsBefore.has(messageId)) {
+                                return false; // This is an old message
+                            }
+                            
+                            // Check timestamp - must be after we started sending
+                            const messageTime = m.timestamp * 1000;
+                            const timeSinceStart = messageTime - sendStartTime;
+                            
+                            // Message should be sent after we started (with small buffer for clock differences)
+                            if (timeSinceStart < -2000) {
+                                console.log(`   Message timestamp is ${Math.abs(timeSinceStart)}ms before send start - likely old message`);
+                                return false;
+                            }
+                            
+                            console.log(`✅ Found NEW message sent ${Math.round(timeSinceStart/1000)}s after send attempt`);
+                            return true;
+                        });
                         
                         if (found) {
-                            console.log(`✅ Message verified as sent despite markedUnread error`);
+                            const messageId = found.id.id || found.id._serialized || found.id || 'unknown';
+                            console.log(`✅ Message verified as sent despite markedUnread error (Message ID: ${messageId})`);
                             successList.push({ number: contact.number });
                         } else {
-                            console.error(`❌ markedUnread error and message NOT found - send failed`);
+                            console.error(`❌ markedUnread error and NEW message NOT found - send likely FAILED`);
+                            console.error(`   Looking for: "${contact.message}"`);
+                            console.error(`   Messages before send: ${messagesBefore.filter(m => m.fromMe).length} from me`);
+                            console.error(`   Messages after send: ${messagesAfter.filter(m => m.fromMe).slice(0, 3).map(m => `"${m.body.substring(0, 20)}..."`).join(', ')}`);
                             throw sendError; // Re-throw to trigger retry
                         }
                     } catch (verifyError) {
