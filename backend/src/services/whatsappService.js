@@ -3,6 +3,7 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 let client;
 let isReady = false;
 let latestQR = null; // Store latest QR as base64 for frontend
+let isInitializing = false; // Prevent multiple simultaneous initializations
 
 const getStatus = async () => {
     if (!client) {
@@ -21,7 +22,25 @@ const getStatus = async () => {
 };
 
 const initializeClient = async () => {
-    if (client) return client;
+    // Prevent multiple simultaneous initializations
+    if (isInitializing) {
+        console.log("⚠️ Client initialization already in progress, waiting...");
+        // Wait for existing initialization to complete
+        while (isInitializing) {
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        return client;
+    }
+    
+    // Prevent multiple initializations
+    if (client) {
+        console.log("⚠️ Client already exists, returning existing client");
+        return client;
+    }
+    
+    // If client was destroyed due to LOGOUT, we need to create a new one
+    console.log("🔄 Creating new WhatsApp client instance...");
+    isInitializing = true;
 
     client = new Client({
       authStrategy: new LocalAuth({ clientId: "main" }),
@@ -72,29 +91,72 @@ const initializeClient = async () => {
 
     client.on("ready", async () => {
         console.log("🚀 WhatsApp client ready.");
-        try {
-            const state = await client.getState();
-            console.log(`📊 Client state: ${state}`);
-            if (state === 'CONNECTED') {
-                isReady = true;
-                latestQR = null;
-            } else {
-                console.warn(`⚠️ Client ready but state is ${state}, not CONNECTED`);
-                isReady = false;
+        
+        // Wait for CONNECTED state - it might take a moment after "ready" event
+        const waitForConnected = async () => {
+            const maxAttempts = 30; // 30 attempts = 30 seconds max
+            const delayMs = 1000; // Check every second
+            
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    const state = await client.getState();
+                    console.log(`📊 Client state (attempt ${attempt}/${maxAttempts}): ${state}`);
+                    
+                    if (state === 'CONNECTED') {
+                        console.log(`✅ Client is now CONNECTED!`);
+                        isReady = true;
+                        latestQR = null;
+                        return;
+                    } else if (state === 'OPENING') {
+                        console.log(`⏳ Still opening... waiting for CONNECTED state...`);
+                        // Wait before next check
+                        await new Promise(r => setTimeout(r, delayMs));
+                    } else {
+                        console.warn(`⚠️ Unexpected state: ${state}, waiting...`);
+                        await new Promise(r => setTimeout(r, delayMs));
+                    }
+                } catch (error) {
+                    console.error(`Error checking state (attempt ${attempt}):`, error.message);
+                    await new Promise(r => setTimeout(r, delayMs));
+                }
             }
-        } catch (error) {
-            console.error("Error checking state on ready:", error);
-            isReady = true; // Assume ready if we can't check
+            
+            // If we get here, we timed out waiting for CONNECTED
+            console.error("❌ Timeout waiting for CONNECTED state. Client may not be fully ready.");
+            // Still set as ready to allow attempts, but log warning
+            isReady = true;
             latestQR = null;
-        }
+        };
+        
+        await waitForConnected();
     });
 
     client.on("disconnected", (reason) => {
-        console.error("❌ WhatsApp disconnected:", reason);
+        console.error(`❌ WhatsApp disconnected: ${reason}`);
         isReady = false;
-        // Try to reinitialize if disconnected
-        if (reason === 'NAVIGATION') {
-            console.log("Attempting to reconnect...");
+        latestQR = null;
+        
+        // Handle different disconnect reasons
+        if (reason === 'LOGOUT') {
+            console.error("🚨 WhatsApp logged out the session. This usually means:");
+            console.error("   - Multiple sessions detected on the same account");
+            console.error("   - Session was logged out from another device");
+            console.error("   - WhatsApp detected suspicious activity");
+            console.error("   - You may have WhatsApp Web open in another browser/tab");
+            console.error("   You will need to scan QR code again to reconnect.");
+            // Don't auto-reconnect on LOGOUT - require manual re-auth
+            // Destroy the client to allow fresh initialization
+            if (client) {
+                try {
+                    client.destroy();
+                } catch (e) {
+                    // Ignore destroy errors
+                }
+            }
+            client = null;
+            isInitializing = false; // Allow re-initialization
+        } else if (reason === 'NAVIGATION') {
+            console.log("⚠️ Navigation disconnect - attempting to reconnect...");
             setTimeout(() => {
                 if (client) {
                     client.initialize().catch(err => {
@@ -102,6 +164,8 @@ const initializeClient = async () => {
                     });
                 }
             }, 5000);
+        } else {
+            console.log(`⚠️ Disconnect reason: ${reason} - will require manual reconnection`);
         }
     });
 
@@ -111,8 +175,20 @@ const initializeClient = async () => {
         latestQR = null;
     });
 
-    await client.initialize();
-    return client;
+    // Listen for state changes as backup
+    // Note: whatsapp-web.js doesn't have a direct state change event,
+    // but we can check periodically or rely on the ready event polling
+    
+    try {
+        await client.initialize();
+        isInitializing = false;
+        return client;
+    } catch (error) {
+        isInitializing = false;
+        console.error("❌ Failed to initialize client:", error);
+        client = null;
+        throw error;
+    }
 };
 
 const sendMessage = async (contacts) => {
