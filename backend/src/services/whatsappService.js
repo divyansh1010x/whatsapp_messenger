@@ -26,10 +26,14 @@ const initializeClient = async () => {
     client = new Client({
       authStrategy: new LocalAuth({ clientId: "main" }),
       puppeteer: {
-        headless: false,
+        headless: true,
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--disable-software-rasterizer",
+          "--disable-extensions",
           "--disable-web-security"
         ]
       },
