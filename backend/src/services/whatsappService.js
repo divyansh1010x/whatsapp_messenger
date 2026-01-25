@@ -258,13 +258,34 @@ const sendMessage = async (contacts) => {
             }
             
             try {
+                // Try page method first to avoid markedUnread error entirely
                 let sendPromise;
-                if (chat) {
-                    console.log(`📤 Sending via chat.sendMessage...`);
-                    sendPromise = chat.sendMessage(contact.message);
+                const page = client.pupPage;
+                
+                if (page) {
+                    console.log(`📤 Sending via page.evaluate (direct method)...`);
+                    sendPromise = page.evaluate(async (chatId, messageText) => {
+                        const chat = await window.Store.Chat.get(chatId);
+                        if (!chat) {
+                            throw new Error("Chat not found");
+                        }
+                        // Send message directly using WhatsApp Web's internal API
+                        // This bypasses the library's sendMessage and sendSeen functions
+                        const message = await window.Store.sendMessage(chat, messageText);
+                        return {
+                            id: message.id,
+                            body: message.body
+                        };
+                    }, chatId, contact.message);
                 } else {
-                    console.log(`📤 Sending via client.sendMessage...`);
-                    sendPromise = client.sendMessage(chatId, contact.message);
+                    // Fallback to library method if page not available
+                    if (chat) {
+                        console.log(`📤 Sending via chat.sendMessage (fallback)...`);
+                        sendPromise = chat.sendMessage(contact.message);
+                    } else {
+                        console.log(`📤 Sending via client.sendMessage (fallback)...`);
+                        sendPromise = client.sendMessage(chatId, contact.message);
+                    }
                 }
                 
                 // Race between send and timeout
@@ -324,61 +345,10 @@ const sendMessage = async (contacts) => {
                         throw sendError; // Re-throw to trigger retry
                     }
                 } else if (errorStr.includes('markedUnread') || errorStr.includes('sendSeen')) {
-                    console.log(`⚠️ markedUnread error occurred - verifying if NEW message was actually sent...`);
-                    
-                    // Wait for message to appear
-                    await new Promise(r => setTimeout(r, 4000));
-                    
-                    try {
-                        const verifyChat = await client.getChatById(chatId);
-                        const messagesAfter = await verifyChat.fetchMessages({ limit: 10 });
-                        
-                        // Find message that:
-                        // 1. Was sent by us (fromMe)
-                        // 2. Has exact body match
-                        // 3. Was NOT in messagesBefore (it's a NEW message)
-                        // 4. Was sent after sendStartTime
-                        const messageIdsBefore = new Set(messagesBefore.map(m => m.id._serialized || m.id.id || String(m.id)));
-                        
-                        const found = messagesAfter.find(m => {
-                            if (!m.fromMe) return false;
-                            if (m.body !== contact.message) return false; // EXACT match only
-                            
-                            // Check if this is a NEW message (not in messagesBefore)
-                            const messageId = m.id._serialized || m.id.id || String(m.id);
-                            if (messageIdsBefore.has(messageId)) {
-                                return false; // This is an old message
-                            }
-                            
-                            // Check timestamp - must be after we started sending
-                            const messageTime = m.timestamp * 1000;
-                            const timeSinceStart = messageTime - sendStartTime;
-                            
-                            // Message should be sent after we started (with small buffer for clock differences)
-                            if (timeSinceStart < -2000) {
-                                console.log(`   Message timestamp is ${Math.abs(timeSinceStart)}ms before send start - likely old message`);
-                                return false;
-                            }
-                            
-                            console.log(`✅ Found NEW message sent ${Math.round(timeSinceStart/1000)}s after send attempt`);
-                            return true;
-                        });
-                        
-                        if (found) {
-                            const messageId = found.id.id || found.id._serialized || found.id || 'unknown';
-                            console.log(`✅ Message verified as sent despite markedUnread error (Message ID: ${messageId})`);
-                            successList.push({ number: contact.number });
-                        } else {
-                            console.error(`❌ markedUnread error and NEW message NOT found - send likely FAILED`);
-                            console.error(`   Looking for: "${contact.message}"`);
-                            console.error(`   Messages before send: ${messagesBefore.filter(m => m.fromMe).length} from me`);
-                            console.error(`   Messages after send: ${messagesAfter.filter(m => m.fromMe).slice(0, 3).map(m => `"${m.body.substring(0, 20)}..."`).join(', ')}`);
-                            throw sendError; // Re-throw to trigger retry
-                        }
-                    } catch (verifyError) {
-                        console.error(`❌ Could not verify: ${verifyError.message}`);
-                        throw sendError; // Re-throw to trigger retry
-                    }
+                    // markedUnread error means the send likely FAILED
+                    // Don't try to verify - just retry immediately with a workaround
+                    console.error(`❌ markedUnread error - message likely NOT sent. Retrying with workaround...`);
+                    throw sendError; // Re-throw to trigger retry in outer catch
                 } else {
                     throw sendError;
                 }
@@ -388,49 +358,61 @@ const sendMessage = async (contacts) => {
             const errorMsg = error.message || String(error);
             const errorString = String(error);
             
-            // Handle markedUnread error specifically - retry with different approach
+            // Handle markedUnread error specifically - use page directly to bypass library bug
             if (errorMsg.includes('markedUnread') || errorString.includes('markedUnread')) {
-                console.error(`❌ markedUnread error for ${contact.number} - retrying with alternative method...`);
+                console.error(`❌ markedUnread error for ${contact.number} - trying direct page method...`);
                 try {
                     // Wait a moment before retry
                     await new Promise(r => setTimeout(r, 2000));
                     
-                    // Try sending using the page directly to bypass markedUnread
-                    // Use a simpler approach - just retry with client.sendMessage
-                    console.log(`🔄 Retry attempt 1: Using client.sendMessage...`);
-                    const retryResult = await Promise.race([
-                        client.sendMessage(chatId, contact.message),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error("Retry timeout")), 30000)
-                        )
-                    ]);
+                    // Use page.evaluate to send directly, bypassing the library's sendMessage
+                    const page = client.pupPage;
+                    if (!page) {
+                        throw new Error("Cannot access page for direct send");
+                    }
                     
-                    if (retryResult && retryResult.id) {
-                        const messageId = retryResult.id.id || retryResult.id._serialized || retryResult.id || 'unknown';
-                        console.log(`✅ Successfully sent to ${contact.number} on retry (Message ID: ${messageId})`);
+                    console.log(`🔄 Retry: Using page.evaluate to send directly (bypassing markedUnread)...`);
+                    
+                    // Send using WhatsApp Web's internal API directly
+                    const pageResult = await page.evaluate(async (chatId, messageText) => {
+                        const chat = await window.Store.Chat.get(chatId);
+                        if (!chat) {
+                            throw new Error("Chat not found");
+                        }
+                        // Send message directly - this bypasses sendSeen
+                        const message = await window.Store.sendMessage(chat, messageText);
+                        return {
+                            id: message.id,
+                            body: message.body
+                        };
+                    }, chatId, contact.message);
+                    
+                    if (pageResult && pageResult.id) {
+                        console.log(`✅ Successfully sent via page method to ${contact.number}`);
                         successList.push({ number: contact.number });
                     } else {
-                        // Verify by checking chat
-                        await new Promise(r => setTimeout(r, 2000));
-                        try {
-                            const verifyChat = await client.getChatById(chatId);
-                            const messages = await verifyChat.fetchMessages({ limit: 5 });
-                            const found = messages.find(m => m.fromMe && (m.body === contact.message || contact.message.includes(m.body)));
-                            if (found) {
-                                console.log(`✅ Verified message sent on retry to ${contact.number}`);
-                                successList.push({ number: contact.number });
-                            } else {
-                                throw new Error("Message not found after retry");
-                            }
-                        } catch {
-                            console.error(`❌ Could not verify retry send for ${contact.number}`);
-                            throw new Error("Retry failed - message not verified");
+                        // Verify by checking for new message
+                        await new Promise(r => setTimeout(r, 3000));
+                        const verifyChat = await client.getChatById(chatId);
+                        const messagesAfter = await verifyChat.fetchMessages({ limit: 5 });
+                        const messageIdsBefore = new Set(messagesBefore.map(m => m.id._serialized || m.id.id || String(m.id)));
+                        const found = messagesAfter.find(m => {
+                            if (!m.fromMe || m.body !== contact.message) return false;
+                            const msgId = m.id._serialized || m.id.id || String(m.id);
+                            return !messageIdsBefore.has(msgId); // Must be new
+                        });
+                        
+                        if (found) {
+                            console.log(`✅ Verified NEW message sent on retry to ${contact.number}`);
+                            successList.push({ number: contact.number });
+                        } else {
+                            throw new Error("Message not found after page send");
                         }
                     }
                 } catch (retryError) {
                     const retryErrorMsg = retryError.message || String(retryError);
-                    console.error(`❌ Retry failed for ${contact.number}: ${retryErrorMsg}`);
-                    failedList.push({ number: contact.number, error: `markedUnread error - retry failed: ${retryErrorMsg}` });
+                    console.error(`❌ Page method also failed for ${contact.number}: ${retryErrorMsg}`);
+                    failedList.push({ number: contact.number, error: `markedUnread error - all methods failed: ${retryErrorMsg}` });
                 }
             } else if (errorMsg.includes('timeout')) {
                 consecutiveTimeouts++;
