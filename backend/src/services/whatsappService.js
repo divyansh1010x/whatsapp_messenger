@@ -82,32 +82,56 @@ const sendMessage = async (contacts) => {
 
     for (const contact of contacts) {
         const chatId = `${contact.number}@c.us`;
+        let retries = 0;
+        const maxRetries = 2;
 
-        try {
-            // ⏱️ Hard timeout protection
-            const sendPromise = client.sendMessage(chatId, contact.message);
+        while (retries < maxRetries) {
+            try {
+                // ⏱️ Hard timeout protection
+                const sendPromise = client.sendMessage(chatId, contact.message);
 
-            const result = await Promise.race([
-                sendPromise,
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Send timeout")), 15000)
-                )
-            ]);
+                const result = await Promise.race([
+                    sendPromise,
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Send timeout")), 15000)
+                    )
+                ]);
 
-            // Message sent successfully
-            if (result && result.id) {
-                console.log(`✅ Sent to ${contact.number} (Message ID: ${result.id.id})`);
-                successList.push({ number: contact.number, messageId: result.id.id });
-            } else {
-                console.log(`✅ Sent to ${contact.number}`);
-                successList.push({ number: contact.number });
+                // Message sent successfully
+                if (result && result.id) {
+                    console.log(`✅ Sent to ${contact.number} (Message ID: ${result.id.id})`);
+                    successList.push({ number: contact.number, messageId: result.id.id });
+                    break; // Exit retry loop on success
+                } else {
+                    console.log(`✅ Sent to ${contact.number}`);
+                    successList.push({ number: contact.number });
+                    break; // Exit retry loop on success
+                }
+
+            } catch (error) {
+                const errorStr = error.toString();
+                
+                // Check for markedUnread error - retry once
+                if (errorStr.includes('markedUnread') && retries < maxRetries - 1) {
+                    retries++;
+                    console.warn(`⚠️ markedUnread error for ${contact.number}, retrying... (attempt ${retries})`);
+                    await new Promise(r => setTimeout(r, 1000)); // Wait before retry
+                    continue;
+                }
+                
+                // If it's the markedUnread error after retries, consider it sent
+                if (errorStr.includes('markedUnread')) {
+                    console.warn(`⚠️ markedUnread error for ${contact.number}, but message likely sent`);
+                    successList.push({ number: contact.number, markedUnreadError: true });
+                    break;
+                }
+
+                // Other errors = failed
+                console.error(`❌ Failed to send to ${contact.number}:`);
+                console.error(`Error Message: ${error.message}`);
+                failedList.push({ number: contact.number, error: error.message });
+                break; // Exit retry loop on non-markedUnread error
             }
-
-        } catch (error) {
-            console.error(`❌ Failed to send to ${contact.number}:`);
-            console.error(`Error Message: ${error.message}`);
-            console.error(`Full Error:`, error);
-            failedList.push({ number: contact.number, error: error.message });
         }
 
         // ⚠️ Keep delay to avoid rate limiting
