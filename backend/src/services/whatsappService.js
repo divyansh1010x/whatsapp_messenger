@@ -59,7 +59,7 @@ const initializeClient = async () => {
 
 const sendMessage = async (contacts) => {
     if (!isReady) {
-        throw new Error("WhatsApp client not ready. Please log in first.");
+        throw new Error("WhatsApp client not ready");
     }
 
     const successList = [];
@@ -69,31 +69,26 @@ const sendMessage = async (contacts) => {
         const chatId = `${contact.number}@c.us`;
 
         try {
-            // 1️⃣ Check if number exists on WhatsApp
-            const isRegistered = await client.isRegisteredUser(chatId);
-            if (!isRegistered) {
-                console.log(`❌ ${contact.number} is not on WhatsApp`);
-                failedList.push({ number: contact.number, reason: "Not on WhatsApp" });
-                continue;
-            }
+            // ⏱️ Hard timeout protection (VERY IMPORTANT)
+            const sendPromise = client.sendMessage(chatId, contact.message);
 
-            // 2️⃣ Force chat creation (IMPORTANT)
-            await client.sendMessage(chatId, " "); // invisible bootstrap
-            await new Promise(r => setTimeout(r, 1000));
+            await Promise.race([
+                sendPromise,
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Send timeout")), 15000)
+                )
+            ]);
 
-            // 3️⃣ Send actual message
-            await client.sendMessage(chatId, contact.message);
-
-            successList.push({ number: contact.number });
             console.log(`✅ Sent to ${contact.number}`);
+            successList.push({ number: contact.number });
 
         } catch (error) {
-            console.error(`❌ Failed to send to ${contact.number}:`, error.message);
-            failedList.push({ number: contact.number, reason: error.message });
+            console.error(`❌ Failed to send to ${contact.number}: ${error.message}`);
+            failedList.push({ number: contact.number });
         }
 
-        // 4️⃣ Rate-limit (avoid ban)
-        await new Promise(r => setTimeout(r, 2000));
+        // ⚠️ Keep delay small but safe
+        await new Promise(r => setTimeout(r, 1200));
     }
 
     return { sent: successList, failed: failedList };
