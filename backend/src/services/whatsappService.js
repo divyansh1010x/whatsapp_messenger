@@ -89,16 +89,29 @@ const sendMessage = async (contacts) => {
 
         try {
             // Send message with timeout protection
-            const result = await Promise.race([
-                client.sendMessage(chatId, contact.message),
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Send timeout")), 15000)
-                )
-            ]);
-
-            // Message sent successfully
-            console.log(`✅ Sent to ${contact.number}`);
-            successList.push({ number: contact.number });
+            let messageSent = false;
+            
+            try {
+                const result = await Promise.race([
+                    client.sendMessage(chatId, contact.message),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Send timeout")), 15000)
+                    )
+                ]);
+                messageSent = true;
+                console.log(`✅ Sent to ${contact.number}`);
+                successList.push({ number: contact.number });
+            } catch (sendError) {
+                // If it's a markedUnread error, the message was actually sent
+                // The error occurs in sendSeen() which runs AFTER sendMessage completes
+                if (sendError.toString().includes('markedUnread')) {
+                    messageSent = true;
+                    console.log(`✅ Sent to ${contact.number} (markedUnread error after send - message delivered)`);
+                    successList.push({ number: contact.number });
+                } else {
+                    throw sendError; // Re-throw non-markedUnread errors
+                }
+            }
 
         } catch (error) {
             console.error(`❌ Failed to send to ${contact.number}: ${error.message}`);
