@@ -84,13 +84,6 @@ const sendMessage = async (contacts) => {
         const chatId = `${contact.number}@c.us`;
 
         try {
-            // Get the chat object first to verify it exists
-            const chat = await client.getChatById(chatId);
-            
-            if (!chat) {
-                throw new Error("Chat not found or cannot be accessed");
-            }
-
             // ⏱️ Hard timeout protection
             const sendPromise = client.sendMessage(chatId, contact.message);
 
@@ -111,7 +104,9 @@ const sendMessage = async (contacts) => {
             }
 
         } catch (error) {
-            console.error(`❌ Failed to send to ${contact.number}: ${error.message}`);
+            console.error(`❌ Failed to send to ${contact.number}:`);
+            console.error(`Error Message: ${error.message}`);
+            console.error(`Full Error:`, error);
             failedList.push({ number: contact.number, error: error.message });
         }
 
