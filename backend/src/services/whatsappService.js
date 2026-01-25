@@ -24,12 +24,21 @@ const initializeClient = async () => {
     if (client) return client;
 
     client = new Client({
-        authStrategy: new LocalAuth({ clientId: "main" }),
-        puppeteer: {
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        },
+      authStrategy: new LocalAuth({ clientId: "main" }),
+      puppeteer: {
+        headless: false,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-web-security"
+        ]
+      },
+      webVersion: "2.2409.2",
+      webVersionCache: {
+        type: "remote"
+      }
     });
+
 
     client.on("qr", async (qr) => {
         const QRCode = require("qrcode");
