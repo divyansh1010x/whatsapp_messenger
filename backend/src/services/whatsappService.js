@@ -150,17 +150,42 @@ const sendMessage = async (contacts) => {
 
     for (const contact of contacts) {
         const chatId = `${contact.number}@c.us`;
-        console.log(`📤 Attempting to send to ${chatId}...`);
+        console.log(`📤 Attempting to send to ${contact.number}...`);
 
         try {
-            // Send message directly with timeout
-            // Using a shorter timeout to fail fast and provide better feedback
-            const sendPromise = client.sendMessage(chatId, contact.message);
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("Send timeout after 20 seconds - client may be disconnected")), 20000)
-            );
+            // Get or create chat first to avoid markedUnread errors
+            let chat;
+            try {
+                chat = await Promise.race([
+                    client.getChatById(chatId),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Chat lookup timeout")), 10000))
+                ]);
+                console.log(`✅ Chat found for ${contact.number}`);
+            } catch (chatError) {
+                // Chat doesn't exist yet - it will be created when we send
+                console.log(`ℹ️ Chat doesn't exist yet for ${contact.number}, will be created on send`);
+                chat = null;
+            }
 
-            const result = await Promise.race([sendPromise, timeoutPromise]);
+            // Send message - use chat.sendMessage if available, otherwise use client.sendMessage
+            let result;
+            if (chat) {
+                // Use chat's sendMessage method which handles markedUnread better
+                result = await Promise.race([
+                    chat.sendMessage(contact.message),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Send timeout after 30 seconds")), 30000)
+                    )
+                ]);
+            } else {
+                // Use client.sendMessage - chat will be created automatically
+                result = await Promise.race([
+                    client.sendMessage(chatId, contact.message),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Send timeout after 30 seconds")), 30000)
+                    )
+                ]);
+            }
             
             // Verify we got a valid result
             if (result && result.id) {
@@ -168,17 +193,58 @@ const sendMessage = async (contacts) => {
                 console.log(`✅ Successfully sent to ${contact.number} (Message ID: ${messageId})`);
                 successList.push({ number: contact.number });
             } else {
-                console.warn(`⚠️ Message sent but no ID returned for ${contact.number}`);
-                // Still count as success if no error was thrown
+                // Even if no ID, if no error was thrown, consider it success
+                console.log(`✅ Message sent to ${contact.number} (no ID returned but no error)`);
                 successList.push({ number: contact.number });
             }
 
         } catch (error) {
             const errorMsg = error.message || String(error);
-            console.error(`❌ Failed to send to ${contact.number}: ${errorMsg}`);
+            const errorString = String(error);
             
-            // If it's a timeout, the client might be disconnected
-            if (errorMsg.includes('timeout')) {
+            // Handle markedUnread error specifically - this happens when chat is undefined
+            if (errorMsg.includes('markedUnread') || errorString.includes('markedUnread')) {
+                console.error(`❌ markedUnread error for ${contact.number} - retrying with chat creation...`);
+                try {
+                    // Wait a moment
+                    await new Promise(r => setTimeout(r, 1500));
+                    
+                    // Force get/create chat first
+                    let retryChat;
+                    try {
+                        retryChat = await Promise.race([
+                            client.getChatById(chatId),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error("Chat lookup failed")), 8000))
+                        ]);
+                    } catch {
+                        // If chat doesn't exist, send a message to create it
+                        // First message to a new number creates the chat
+                        console.log(`Creating new chat for ${contact.number}...`);
+                    }
+                    
+                    // Retry sending - if chat exists, use it; otherwise use client method
+                    const retryResult = await Promise.race([
+                        retryChat ? retryChat.sendMessage(contact.message) : client.sendMessage(chatId, contact.message),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error("Retry timeout")), 30000)
+                        )
+                    ]);
+                    
+                    if (retryResult && retryResult.id) {
+                        const messageId = retryResult.id.id || retryResult.id._serialized || retryResult.id || 'unknown';
+                        console.log(`✅ Successfully sent to ${contact.number} on retry (Message ID: ${messageId})`);
+                        successList.push({ number: contact.number });
+                    } else {
+                        // Even without ID, if no error, consider success
+                        console.log(`✅ Message sent to ${contact.number} on retry (no ID but no error)`);
+                        successList.push({ number: contact.number });
+                    }
+                } catch (retryError) {
+                    const retryErrorMsg = retryError.message || String(retryError);
+                    console.error(`❌ Retry also failed for ${contact.number}: ${retryErrorMsg}`);
+                    failedList.push({ number: contact.number, error: `markedUnread error - retry failed: ${retryErrorMsg}` });
+                }
+            } else if (errorMsg.includes('timeout')) {
                 consecutiveTimeouts++;
                 console.error(`⚠️ Timeout #${consecutiveTimeouts} - client may be disconnected. Current state: ${clientState}, ready: ${isReady}`);
                 
@@ -187,11 +253,12 @@ const sendMessage = async (contacts) => {
                     console.error("🚨 Multiple timeouts detected. Marking client as not ready.");
                     isReady = false;
                 }
+                failedList.push({ number: contact.number, error: errorMsg });
             } else {
                 consecutiveTimeouts = 0; // Reset on non-timeout errors
+                console.error(`❌ Failed to send to ${contact.number}: ${errorMsg}`);
+                failedList.push({ number: contact.number, error: errorMsg });
             }
-            
-            failedList.push({ number: contact.number, error: errorMsg });
         }
 
         // Delay to avoid rate limiting (increased to 2 seconds)
