@@ -43,30 +43,61 @@ const initializeClient = async () => {
     isInitializing = true;
 
     // Determine Chrome executable path for Render
+    // Chrome is installed at: /opt/render/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome
     let chromePath;
-    const puppeteer = require('puppeteer');
-    try {
-      // Try to get the executable path from puppeteer
-      chromePath = puppeteer.executablePath();
-      console.log(`✅ Found Chrome at: ${chromePath}`);
-    } catch (e) {
-      // If that fails, try common Render paths
-      const possiblePaths = [
-        '/opt/render/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome',
-        process.env.PUPPETEER_EXECUTABLE_PATH,
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser'
-      ];
-      
-      for (const path of possiblePaths) {
-        if (path && require('fs').existsSync(path)) {
-          chromePath = path;
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Set Puppeteer cache directory for Render
+    process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+    
+    // Try to find Chrome in the cache directory
+    const cacheDir = process.env.PUPPETEER_CACHE_DIR;
+    const possiblePaths = [
+      // Exact path from build logs
+      '/opt/render/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome',
+      // Try to find any chrome in cache directory
+      ...(fs.existsSync(cacheDir) ? 
+        (() => {
+          try {
+            const chromeDirs = fs.readdirSync(cacheDir + '/chrome', { withFileTypes: true })
+              .filter(dirent => dirent.isDirectory())
+              .map(dirent => dirent.name);
+            
+            return chromeDirs.map(dir => {
+              const chromePath = path.join(cacheDir, 'chrome', dir, 'chrome-linux64', 'chrome');
+              return chromePath;
+            });
+          } catch (e) {
+            return [];
+          }
+        })() : []),
+      // Environment variable
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      // System locations
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser'
+    ].filter(Boolean);
+    
+    for (const testPath of possiblePaths) {
+      try {
+        if (fs.existsSync(testPath)) {
+          chromePath = testPath;
           console.log(`✅ Found Chrome at: ${chromePath}`);
           break;
         }
+      } catch (e) {
+        // Continue searching
       }
-      
-      if (!chromePath) {
+    }
+    
+    if (!chromePath) {
+      // Try puppeteer's executablePath as last resort
+      try {
+        const puppeteer = require('puppeteer');
+        chromePath = puppeteer.executablePath();
+        console.log(`✅ Found Chrome via puppeteer.executablePath(): ${chromePath}`);
+      } catch (e) {
         console.warn(`⚠️ Could not find Chrome executable, Puppeteer will try to find it automatically`);
       }
     }
