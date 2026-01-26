@@ -343,8 +343,81 @@ const sendMessage = async (contacts) => {
 
     const successList = [];
     const failedList = [];
+    
+    // Track same-number sends for progressive delay
+    const numberSendCount = new Map(); // number -> count of sends in this batch
+    const lastSendTime = new Map(); // number -> timestamp of last send
 
     for (const contact of contacts) {
+        // Check connection state before each send - reconnect if needed
+        try {
+            const currentState = await Promise.race([
+                client.getState(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("State check timeout")), 5000))
+            ]);
+            
+            if (currentState !== 'CONNECTED') {
+                console.warn(`⚠️ Client disconnected (state: ${currentState}) during campaign. Attempting to reconnect...`);
+                isReady = false;
+                
+                // ACTIVE RECONNECTION: Try to reconnect if not LOGOUT
+                if (currentState !== 'LOGOUT' && client) {
+                    try {
+                        console.log(`🔄 Attempting to reinitialize client...`);
+                        await client.initialize();
+                        
+                        // Wait for ready event or check state
+                        await new Promise(r => setTimeout(r, 3000));
+                        
+                        const recheckState = await Promise.race([
+                            client.getState(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error("State check timeout")), 5000))
+                        ]);
+                        
+                        if (recheckState === 'CONNECTED') {
+                            console.log(`✅ Client reconnected successfully`);
+                            isReady = true;
+                        } else {
+                            console.error(`❌ Reconnection failed - state: ${recheckState}`);
+                            // Add remaining contacts to failed list
+                            const remainingIndex = contacts.indexOf(contact);
+                            for (let i = remainingIndex; i < contacts.length; i++) {
+                                failedList.push({ 
+                                    number: contacts[i].number, 
+                                    error: `Client disconnected during campaign (state: ${recheckState})` 
+                                });
+                            }
+                            break; // Exit loop
+                        }
+                    } catch (reconnectError) {
+                        console.error(`❌ Reconnection attempt failed: ${reconnectError.message}`);
+                        // Add remaining contacts to failed list
+                        const remainingIndex = contacts.indexOf(contact);
+                        for (let i = remainingIndex; i < contacts.length; i++) {
+                            failedList.push({ 
+                                number: contacts[i].number, 
+                                error: `Reconnection failed: ${reconnectError.message}` 
+                            });
+                        }
+                        break; // Exit loop
+                    }
+                } else {
+                    // LOGOUT or no client - cannot reconnect
+                    console.error(`❌ Cannot reconnect - state: ${currentState}. Skipping remaining messages.`);
+                    const remainingIndex = contacts.indexOf(contact);
+                    for (let i = remainingIndex; i < contacts.length; i++) {
+                        failedList.push({ 
+                            number: contacts[i].number, 
+                            error: `Client logged out during campaign (state: ${currentState})` 
+                        });
+                    }
+                    break; // Exit loop
+                }
+            }
+        } catch (stateCheckError) {
+            console.error(`❌ Error checking state during send: ${stateCheckError.message}`);
+            // Continue anyway - might be temporary
+        }
         const chatId = `${contact.number}@c.us`;
         console.log(`📤 Attempting to send to ${contact.number}...`);
 
@@ -576,11 +649,30 @@ const sendMessage = async (contacts) => {
                 consecutiveTimeouts++;
                 console.error(`⚠️ Timeout #${consecutiveTimeouts} - client may be disconnected. Current state: ${clientState}, ready: ${isReady}`);
                 
-                // If we get 2+ consecutive timeouts, mark client as not ready
-                if (consecutiveTimeouts >= 2) {
-                    console.error("🚨 Multiple timeouts detected. Marking client as not ready.");
-                    isReady = false;
+                // Check actual client state before marking as not ready
+                try {
+                    const actualState = await Promise.race([
+                        client.getState(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error("State check timeout")), 3000))
+                    ]);
+                    
+                    // Only mark as not ready if we get 3+ timeouts AND client is actually disconnected
+                    if (consecutiveTimeouts >= 3 && actualState !== 'CONNECTED') {
+                        console.error(`🚨 Multiple timeouts (${consecutiveTimeouts}) and client disconnected (${actualState}). Marking as not ready.`);
+                        isReady = false;
+                    } else if (consecutiveTimeouts >= 3) {
+                        console.warn(`⚠️ Multiple timeouts (${consecutiveTimeouts}) but client still connected. Continuing...`);
+                        // Reset counter if client is still connected - might be temporary network issue
+                        consecutiveTimeouts = 0;
+                    }
+                } catch (stateError) {
+                    // If we can't check state, be conservative - only mark not ready after 4+ timeouts
+                    if (consecutiveTimeouts >= 4) {
+                        console.error("🚨 Multiple timeouts and cannot verify state. Marking client as not ready.");
+                        isReady = false;
+                    }
                 }
+                
                 failedList.push({ number: contact.number, error: errorMsg });
             } else {
                 consecutiveTimeouts = 0; // Reset on non-timeout errors
@@ -589,10 +681,31 @@ const sendMessage = async (contacts) => {
             }
         }
 
-        // Delay to avoid rate limiting (increased to 2 seconds)
-        if (contacts.indexOf(contact) < contacts.length - 1) {
-            await new Promise(r => setTimeout(r, 2000));
+        // PROGRESSIVE DELAY: Increase delay for same-number sends to avoid spam detection
+        const sendCount = numberSendCount.get(contact.number) || 0;
+        numberSendCount.set(contact.number, sendCount + 1);
+        
+        const lastTime = lastSendTime.get(contact.number);
+        const timeSinceLastSend = lastTime ? Date.now() - lastTime : Infinity;
+        
+        // Calculate delay based on same-number send count
+        let delay = 2000; // Base 2 seconds
+        if (sendCount > 1) {
+            // Progressive delay: 2s, 5s, 10s, 15s for 2nd, 3rd, 4th, 5th+ sends to same number
+            delay = Math.min(2000 + (sendCount - 1) * 3000, 15000);
         }
+        
+        // If sending to same number again, ensure minimum time gap
+        if (lastTime && timeSinceLastSend < delay) {
+            const additionalWait = delay - timeSinceLastSend;
+            console.log(`⏳ Progressive delay: Waiting ${additionalWait}ms before next send to ${contact.number} (send #${sendCount + 1} to this number)`);
+            await new Promise(r => setTimeout(r, additionalWait));
+        } else if (contacts.indexOf(contact) < contacts.length - 1) {
+            // Different number or first send - use base delay
+            await new Promise(r => setTimeout(r, delay));
+        }
+        
+        lastSendTime.set(contact.number, Date.now());
     }
 
     return { sent: successList, failed: failedList };

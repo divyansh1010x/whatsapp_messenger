@@ -38,10 +38,40 @@ router.post("/start-campaign", async (req, res) => {
   })
   .filter(c => c !== null);
 
-    console.log("Formatted contacts:", formattedContacts);
+    // DEDUPLICATION: Remove duplicate messages to the same number
+    // Keep only unique number+message combinations, and limit max 5 messages per number
+    const seen = new Map(); // number -> array of messages sent
+    const deduplicatedContacts = [];
+    
+    for (const contact of formattedContacts) {
+        const key = contact.number;
+        if (!seen.has(key)) {
+            seen.set(key, []);
+        }
+        
+        const messagesForNumber = seen.get(key);
+        
+        // Skip if we've already sent this exact message to this number
+        if (messagesForNumber.includes(contact.message)) {
+            console.log(`⚠️ Skipping duplicate: "${contact.message}" already sent to ${contact.number}`);
+            continue;
+        }
+        
+        // Limit to max 5 messages per number per campaign to avoid spam detection
+        if (messagesForNumber.length >= 5) {
+            console.log(`⚠️ Skipping: Already sent 5 messages to ${contact.number} (spam protection)`);
+            continue;
+        }
+        
+        messagesForNumber.push(contact.message);
+        deduplicatedContacts.push(contact);
+    }
 
-    if (formattedContacts.length === 0) {
-        return res.status(400).json({ message: "No valid contacts found for this campaign." });
+    console.log(`📊 Deduplication: ${formattedContacts.length} → ${deduplicatedContacts.length} contacts`);
+    console.log("Formatted contacts:", deduplicatedContacts);
+
+    if (deduplicatedContacts.length === 0) {
+        return res.status(400).json({ message: "No valid contacts found for this campaign after deduplication." });
     }
 
     try {
@@ -51,12 +81,12 @@ router.post("/start-campaign", async (req, res) => {
             return res.status(400).json({ message: status?.message || "WhatsApp client not ready. Please log in first." });
         }
 
-        const result = await sendMessage(formattedContacts);
+        const result = await sendMessage(deduplicatedContacts);
 
         console.log("Sent numbers:", result.sent);
         const sentCount = result?.sent?.length ?? 0;
         const failedContacts = result?.failed ?? [];
-        const totalContacts = formattedContacts.length;
+        const totalContacts = deduplicatedContacts.length;
 
         console.log(`Campaign processed. Sent: ${sentCount}/${totalContacts}`);
 
