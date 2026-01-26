@@ -42,66 +42,6 @@ const initializeClient = async () => {
     console.log("🔄 Creating new WhatsApp client instance...");
     isInitializing = true;
 
-    // Determine Chrome executable path for Render
-    // Chrome is installed at: /opt/render/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome
-    let chromePath;
-    const fs = require('fs');
-    const path = require('path');
-    
-    // Set Puppeteer cache directory for Render
-    process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-    
-    // Try to find Chrome in the cache directory
-    const cacheDir = process.env.PUPPETEER_CACHE_DIR;
-    const possiblePaths = [
-      // Exact path from build logs
-      '/opt/render/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome',
-      // Try to find any chrome in cache directory
-      ...(fs.existsSync(cacheDir) ? 
-        (() => {
-          try {
-            const chromeDirs = fs.readdirSync(cacheDir + '/chrome', { withFileTypes: true })
-              .filter(dirent => dirent.isDirectory())
-              .map(dirent => dirent.name);
-            
-            return chromeDirs.map(dir => {
-              const chromePath = path.join(cacheDir, 'chrome', dir, 'chrome-linux64', 'chrome');
-              return chromePath;
-            });
-          } catch (e) {
-            return [];
-          }
-        })() : []),
-      // Environment variable
-      process.env.PUPPETEER_EXECUTABLE_PATH,
-      // System locations
-      '/usr/bin/google-chrome',
-      '/usr/bin/chromium-browser'
-    ].filter(Boolean);
-    
-    for (const testPath of possiblePaths) {
-      try {
-        if (fs.existsSync(testPath)) {
-          chromePath = testPath;
-          console.log(`✅ Found Chrome at: ${chromePath}`);
-          break;
-        }
-      } catch (e) {
-        // Continue searching
-      }
-    }
-    
-    if (!chromePath) {
-      // Try puppeteer's executablePath as last resort
-      try {
-        const puppeteer = require('puppeteer');
-        chromePath = puppeteer.executablePath();
-        console.log(`✅ Found Chrome via puppeteer.executablePath(): ${chromePath}`);
-      } catch (e) {
-        console.warn(`⚠️ Could not find Chrome executable, Puppeteer will try to find it automatically`);
-      }
-    }
-
     client = new Client({
       authStrategy: new LocalAuth({ clientId: "main" }),
       puppeteer: {
@@ -118,15 +58,12 @@ const initializeClient = async () => {
           "--disable-backgrounding-occluded-windows",
           "--disable-renderer-backgrounding",
           "--disable-features=TranslateUI",
-          "--disable-ipc-flooding-protection",
-          "--single-process" // Helps on Render
+          "--disable-ipc-flooding-protection"
         ],
         // Timeout settings for cloud environments
         timeout: 60000,
         // Ignore HTTPS errors (sometimes needed for cloud)
-        ignoreHTTPSErrors: true,
-        // Set executable path if we found it
-        ...(chromePath && { executablePath: chromePath })
+        ignoreHTTPSErrors: true
       },
       webVersionCache: {
         type: "local"
