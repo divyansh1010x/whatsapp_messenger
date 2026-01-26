@@ -1,9 +1,80 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 
+/**
+ * WHY sendSeen() IS CALLED INTERNALLY:
+ * 
+ * whatsapp-web.js's sendMessage() function internally calls sendSeen() AFTER successfully sending a message.
+ * This is to mark the chat as "read" (blue checkmarks) on your side.
+ * 
+ * THE PROBLEM:
+ * sendSeen() tries to access chat.markedUnread property, but when:
+ * - The chat object is undefined
+ * - The chat hasn't been fully initialized
+ * - WhatsApp Web's internal state is inconsistent
+ * 
+ * It throws: "Cannot read properties of undefined (reading 'markedUnread')"
+ * 
+ * THE SOLUTION:
+ * We monkey-patch window.WWebJS.sendSeen to catch this error and ignore it.
+ * Since the error happens AFTER the message is sent, we can safely ignore it.
+ */
+
 let client;
 let isReady = false;
 let latestQR = null; // Store latest QR as base64 for frontend
 let isInitializing = false; // Prevent multiple simultaneous initializations
+
+/**
+ * MONKEY-PATCH FUNCTION: Safely patches sendSeen to prevent markedUnread crashes
+ * 
+ * This function patches window.WWebJS.sendSeen in the browser context to catch
+ * and ignore markedUnread errors. The error occurs AFTER the message is sent,
+ * so we can safely ignore it without affecting message delivery.
+ */
+const applySendSeenPatch = async (page) => {
+    if (!page) return false;
+    
+    try {
+        await page.evaluate(() => {
+            if (window.WWebJS && typeof window.WWebJS.sendSeen === 'function') {
+                // Store original function
+                const originalSendSeen = window.WWebJS.sendSeen;
+                
+                // Replace with patched version
+                window.WWebJS.sendSeen = async function(chatId) {
+                    try {
+                        // Try to call original function
+                        return await originalSendSeen.call(this, chatId);
+                    } catch (error) {
+                        // Check if it's a markedUnread error
+                        const errorStr = error?.message || String(error) || '';
+                        const isMarkedUnreadError = 
+                            errorStr.includes('markedUnread') || 
+                            errorStr.includes('Cannot read properties of undefined');
+                        
+                        if (isMarkedUnreadError) {
+                            // Message was already sent successfully, ignore this error
+                            // This happens because sendSeen is called AFTER sendMessage
+                            return; // Return successfully, don't throw
+                        }
+                        
+                        // Re-throw other errors (network issues, authentication, etc.)
+                        throw error;
+                    }
+                };
+                
+                // Mark that patch was applied
+                window.__sendSeenPatched = true;
+                return true;
+            }
+            return false;
+        });
+        return true;
+    } catch (error) {
+        console.warn('⚠️ Failed to apply sendSeen patch:', error.message);
+        return false;
+    }
+};
 
 const getStatus = async () => {
     if (!client) {
@@ -92,6 +163,16 @@ const initializeClient = async () => {
     client.on("ready", async () => {
         console.log("🚀 WhatsApp client ready.");
         
+        // Apply sendSeen patch as backup (in case it wasn't applied during initialize)
+        try {
+            const page = client.pupPage;
+            if (page && await applySendSeenPatch(page)) {
+                console.log('✅ sendSeen patch applied in ready event');
+            }
+        } catch (patchError) {
+            console.warn('⚠️ Could not apply sendSeen patch in ready event:', patchError.message);
+        }
+        
         // Wait for CONNECTED state - it might take a moment after "ready" event
         const waitForConnected = async () => {
             const maxAttempts = 30; // 30 attempts = 30 seconds max
@@ -124,8 +205,8 @@ const initializeClient = async () => {
             // If we get here, we timed out waiting for CONNECTED
             console.error("❌ Timeout waiting for CONNECTED state. Client may not be fully ready.");
             // Still set as ready to allow attempts, but log warning
-            isReady = true;
-            latestQR = null;
+        isReady = true;
+        latestQR = null;
         };
         
         await waitForConnected();
@@ -180,9 +261,21 @@ const initializeClient = async () => {
     // but we can check periodically or rely on the ready event polling
     
     try {
-        await client.initialize();
+    await client.initialize();
+        
+        // MONKEY-PATCH: Apply sendSeen patch to prevent markedUnread crashes
+        // This must be done after initialize() so the page is available
+        try {
+            const page = await client.pupPage;
+            if (page && await applySendSeenPatch(page)) {
+                console.log('✅ sendSeen monkey-patch applied successfully');
+            }
+        } catch (patchError) {
+            console.warn('⚠️ Could not apply sendSeen patch (non-critical):', patchError.message);
+        }
+        
         isInitializing = false;
-        return client;
+    return client;
     } catch (error) {
         isInitializing = false;
         console.error("❌ Failed to initialize client:", error);
@@ -390,7 +483,7 @@ const sendMessage = async (contacts) => {
                         }
                     }
                 } else {
-                    throw sendError;
+                throw sendError;
                 }
             }
 
