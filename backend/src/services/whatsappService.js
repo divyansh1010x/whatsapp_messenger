@@ -42,6 +42,35 @@ const initializeClient = async () => {
     console.log("🔄 Creating new WhatsApp client instance...");
     isInitializing = true;
 
+    // Determine Chrome executable path for Render
+    let chromePath;
+    const puppeteer = require('puppeteer');
+    try {
+      // Try to get the executable path from puppeteer
+      chromePath = puppeteer.executablePath();
+      console.log(`✅ Found Chrome at: ${chromePath}`);
+    } catch (e) {
+      // If that fails, try common Render paths
+      const possiblePaths = [
+        '/opt/render/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome',
+        process.env.PUPPETEER_EXECUTABLE_PATH,
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser'
+      ];
+      
+      for (const path of possiblePaths) {
+        if (path && require('fs').existsSync(path)) {
+          chromePath = path;
+          console.log(`✅ Found Chrome at: ${chromePath}`);
+          break;
+        }
+      }
+      
+      if (!chromePath) {
+        console.warn(`⚠️ Could not find Chrome executable, Puppeteer will try to find it automatically`);
+      }
+    }
+
     client = new Client({
       authStrategy: new LocalAuth({ clientId: "main" }),
       puppeteer: {
@@ -65,8 +94,8 @@ const initializeClient = async () => {
         timeout: 60000,
         // Ignore HTTPS errors (sometimes needed for cloud)
         ignoreHTTPSErrors: true,
-        // For Render.com - try to use system Chrome or installed Chrome
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+        // Set executable path if we found it
+        ...(chromePath && { executablePath: chromePath })
       },
       webVersionCache: {
         type: "local"
