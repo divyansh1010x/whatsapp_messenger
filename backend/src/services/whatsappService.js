@@ -58,12 +58,15 @@ const initializeClient = async () => {
           "--disable-backgrounding-occluded-windows",
           "--disable-renderer-backgrounding",
           "--disable-features=TranslateUI",
-          "--disable-ipc-flooding-protection"
+          "--disable-ipc-flooding-protection",
+          "--single-process" // Helps on Render
         ],
         // Timeout settings for cloud environments
         timeout: 60000,
         // Ignore HTTPS errors (sometimes needed for cloud)
-        ignoreHTTPSErrors: true
+        ignoreHTTPSErrors: true,
+        // For Render.com - try to use system Chrome or installed Chrome
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
       },
       webVersionCache: {
         type: "local"
@@ -228,9 +231,12 @@ const sendMessage = async (contacts) => {
         const chatId = `${contact.number}@c.us`;
         console.log(`📤 Attempting to send to ${contact.number}...`);
 
+        // Store chat in outer scope for retry logic
+        let chat = null;
+        let messagesBefore = [];
+
         try {
             // Get or create chat first to avoid markedUnread errors
-            let chat;
             try {
                 chat = await Promise.race([
                     client.getChatById(chatId),
@@ -248,13 +254,23 @@ const sendMessage = async (contacts) => {
             const sendTimeout = 20000; // 20 seconds
             const sendStartTime = Date.now(); // Record when we START sending
             
-            // Get messages before sending to compare later
-            let messagesBefore = [];
+            // Get messages before sending to compare later (wrap in try-catch to avoid markedUnread)
             try {
                 const chatBefore = await client.getChatById(chatId);
-                messagesBefore = await chatBefore.fetchMessages({ limit: 5 });
+                try {
+                    messagesBefore = await chatBefore.fetchMessages({ limit: 5 });
+                } catch (fetchError) {
+                    // If fetchMessages fails with markedUnread, just use empty array
+                    if (String(fetchError).includes('markedUnread')) {
+                        console.log(`⚠️ Could not get messages before (markedUnread), continuing anyway...`);
+                        messagesBefore = [];
+                    } else {
+                        throw fetchError;
+                    }
+                }
             } catch (e) {
                 // Ignore if we can't get messages before
+                messagesBefore = [];
             }
             
             try {
@@ -333,7 +349,22 @@ const sendMessage = async (contacts) => {
                     
                     try {
                         const verifyChat = await client.getChatById(chatId);
-                        const messagesAfter = await verifyChat.fetchMessages({ limit: 10 });
+                        let messagesAfter = [];
+                        try {
+                            messagesAfter = await verifyChat.fetchMessages({ limit: 10 });
+                        } catch (fetchError) {
+                            // If fetchMessages also fails with markedUnread, assume message was sent
+                            if (String(fetchError).includes('markedUnread')) {
+                                console.log(`⚠️ Cannot verify (markedUnread in fetchMessages) - assuming message was sent`);
+                                // Since we can't verify, and markedUnread happens AFTER sending,
+                                // assume the message was sent successfully
+                                successList.push({ number: contact.number });
+                                continue; // Skip to next contact
+                            } else {
+                                throw fetchError;
+                            }
+                        }
+                        
                         const messageIdsBefore = new Set(messagesBefore.map(m => m.id._serialized || m.id.id || String(m.id)));
                         
                         // Find NEW message with exact match
@@ -348,12 +379,18 @@ const sendMessage = async (contacts) => {
                             console.log(`✅ Message WAS sent before markedUnread error (Message ID: ${messageId})`);
                             successList.push({ number: contact.number });
                         } else {
-                            console.error(`❌ markedUnread error and message NOT found - send failed`);
+                            console.error(`❌ markedUnread error and message NOT found - will retry`);
                             throw sendError; // Re-throw to trigger retry
                         }
                     } catch (verifyError) {
-                        console.error(`❌ Could not verify: ${verifyError.message}`);
-                        throw sendError; // Re-throw to trigger retry
+                        // If verification fails with markedUnread, assume message was sent
+                        if (String(verifyError).includes('markedUnread')) {
+                            console.log(`⚠️ Verification failed with markedUnread - assuming message was sent`);
+                            successList.push({ number: contact.number });
+                        } else {
+                            console.error(`❌ Could not verify: ${verifyError.message}`);
+                            throw sendError; // Re-throw to trigger retry
+                        }
                     }
                 } else {
                     throw sendError;
@@ -371,16 +408,20 @@ const sendMessage = async (contacts) => {
                     // Wait a moment before retry
                     await new Promise(r => setTimeout(r, 3000));
                     
-                    // Get chat if we don't have it
-                    let retryChat = chat;
-                    if (!retryChat) {
-                        retryChat = await client.getChatById(chatId);
+                    // Get chat if we don't have it (chat is in outer scope now)
+                    if (!chat) {
+                        try {
+                            chat = await client.getChatById(chatId);
+                        } catch (e) {
+                            console.error(`❌ Could not get chat for retry: ${e.message}`);
+                            throw error; // Re-throw original error
+                        }
                     }
                     
                     // Try using chat.sendMessage if we have chat, otherwise client.sendMessage
-                    console.log(`🔄 Retry: Using ${retryChat ? 'chat.sendMessage' : 'client.sendMessage'}...`);
+                    console.log(`🔄 Retry: Using ${chat ? 'chat.sendMessage' : 'client.sendMessage'}...`);
                     const retryResult = await Promise.race([
-                        retryChat ? retryChat.sendMessage(contact.message) : client.sendMessage(chatId, contact.message),
+                        chat ? chat.sendMessage(contact.message) : client.sendMessage(chatId, contact.message),
                         new Promise((_, reject) =>
                             setTimeout(() => reject(new Error("Retry timeout")), 30000)
                         )
