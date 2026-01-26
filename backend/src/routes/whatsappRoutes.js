@@ -2,11 +2,6 @@ const express = require("express");
 const router = express.Router();
 const { getStatus, sendMessage } = require("../services/whatsappService");
 
-// Health check endpoint - keeps Render.com instance alive
-router.get("/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
 // GET status (includes QR if not logged in)
 router.get("/status", async (req, res) => {
     try {
