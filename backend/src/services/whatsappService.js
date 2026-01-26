@@ -285,17 +285,40 @@ const initializeClient = async () => {
 };
 
 const sendMessage = async (contacts) => {
+    console.log(`\n🔍 === SEND MESSAGE STATUS CHECK ===`);
+    console.log(`📋 isReady flag: ${isReady}`);
+    console.log(`📋 client exists: ${!!client}`);
+    
     if (!client) {
         throw new Error("WhatsApp client not initialized");
     }
 
+    // Check if client is ready - if not, wait a bit and check state
     if (!isReady) {
-        throw new Error("WhatsApp client not ready");
+        console.warn(`⚠️ isReady is false, checking actual client state...`);
+        try {
+            const actualState = await Promise.race([
+                client.getState(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("State check timeout")), 5000))
+            ]);
+            console.log(`📊 Actual client state: ${actualState}`);
+            
+            if (actualState === 'CONNECTED') {
+                console.log(`✅ Client is actually CONNECTED, setting isReady=true`);
+                isReady = true;
+            } else {
+                throw new Error(`WhatsApp client not ready. State: ${actualState}, isReady: ${isReady}`);
+            }
+        } catch (stateCheckError) {
+            console.error(`❌ Client state check failed: ${stateCheckError.message}`);
+            throw new Error(`WhatsApp client not ready. ${stateCheckError.message}`);
+        }
     }
 
     // Verify client is actually connected with timeout
     let clientState = 'UNKNOWN';
     try {
+        console.log(`🔍 Verifying client connection state...`);
         clientState = await Promise.race([
             client.getState(),
             new Promise((_, reject) =>
@@ -305,11 +328,15 @@ const sendMessage = async (contacts) => {
         console.log(`📊 Current client state: ${clientState}`);
         if (clientState !== 'CONNECTED') {
             console.warn(`⚠️ Client state is ${clientState}, not CONNECTED. Attempting to send anyway...`);
+        } else {
+            console.log(`✅ Client confirmed CONNECTED - ready to send messages`);
         }
     } catch (stateError) {
         console.error("❌ Error checking client state:", stateError.message);
         console.warn("⚠️ Proceeding despite state check failure...");
     }
+    
+    console.log(`🔍 === END STATUS CHECK ===\n`);
 
     // If we get multiple timeouts, mark client as not ready
     let consecutiveTimeouts = 0;
