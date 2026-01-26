@@ -23,6 +23,7 @@ let client;
 let isReady = false;
 let latestQR = null; // Store latest QR as base64 for frontend
 let isInitializing = false; // Prevent multiple simultaneous initializations
+let keepAliveInterval = null; // Keep-alive interval to prevent idle disconnects
 
 /**
  * MONKEY-PATCH FUNCTION: Safely patches sendSeen to prevent markedUnread crashes
@@ -246,7 +247,31 @@ const initializeClient = async () => {
                 }
             }, 5000);
         } else {
-            console.log(`⚠️ Disconnect reason: ${reason} - will require manual reconnection`);
+            console.log(`⚠️ Disconnect reason: ${reason} - attempting to reconnect...`);
+            // For other disconnect reasons (like idle timeout), try to reconnect
+            setTimeout(() => {
+                if (client && reason !== 'LOGOUT') {
+                    console.log(`🔄 Attempting to reconnect after ${reason} disconnect...`);
+                    client.initialize().catch(err => {
+                        console.error("Failed to reconnect:", err);
+                    });
+                }
+            }, 5000);
+        }
+        
+        // Restart keep-alive after reconnection
+        if (reason !== 'LOGOUT') {
+            setTimeout(() => {
+                if (client) {
+                    startKeepAlive();
+                }
+            }, 10000); // Wait 10 seconds after disconnect before restarting keep-alive
+        } else {
+            // Stop keep-alive on LOGOUT
+            if (keepAliveInterval) {
+                clearInterval(keepAliveInterval);
+                keepAliveInterval = null;
+            }
         }
     });
 
@@ -259,6 +284,73 @@ const initializeClient = async () => {
     // Listen for state changes as backup
     // Note: whatsapp-web.js doesn't have a direct state change event,
     // but we can check periodically or rely on the ready event polling
+    
+    // KEEP-ALIVE MECHANISM: Prevent idle disconnects
+    const startKeepAlive = () => {
+        // Clear any existing interval
+        if (keepAliveInterval) {
+            clearInterval(keepAliveInterval);
+        }
+        
+        // Check connection every 5 minutes and ping to keep alive
+        keepAliveInterval = setInterval(async () => {
+            if (!client) return;
+            
+            try {
+                const state = await Promise.race([
+                    client.getState(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("State check timeout")), 5000))
+                ]);
+                
+                if (state === 'CONNECTED') {
+                    // Ping WhatsApp by getting a simple property to keep connection alive
+                    try {
+                        // Just check if we can access the page - this keeps the connection active
+                        const page = await client.pupPage;
+                        if (page) {
+                            // Execute a minimal script to keep the page active
+                            await page.evaluate(() => {
+                                // Just touch the page to keep it alive
+                                return window.location.href;
+                            }).catch(() => {
+                                // Ignore errors - connection might be fine
+                            });
+                        }
+                        console.log('💓 Keep-alive ping successful - connection active');
+                    } catch (pingError) {
+                        console.warn('⚠️ Keep-alive ping failed:', pingError.message);
+                    }
+                } else if (state !== 'LOGOUT') {
+                    // Not connected but not logged out - try to reconnect
+                    console.warn(`⚠️ Keep-alive detected disconnect (state: ${state}). Attempting reconnect...`);
+                    isReady = false;
+                    try {
+                        await client.initialize();
+                        await new Promise(r => setTimeout(r, 3000));
+                        const newState = await Promise.race([
+                            client.getState(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error("State check timeout")), 5000))
+                        ]);
+                        if (newState === 'CONNECTED') {
+                            console.log('✅ Keep-alive reconnection successful');
+                            isReady = true;
+                        }
+                    } catch (reconnectError) {
+                        console.error('❌ Keep-alive reconnection failed:', reconnectError.message);
+                    }
+                }
+            } catch (error) {
+                console.warn('⚠️ Keep-alive check failed:', error.message);
+            }
+        }, 5 * 60 * 1000); // Every 5 minutes
+        
+        console.log('✅ Keep-alive mechanism started (checks every 5 minutes)');
+    };
+    
+    // Start keep-alive after client is ready
+    client.once('ready', () => {
+        startKeepAlive();
+    });
     
     try {
     await client.initialize();
@@ -275,6 +367,15 @@ const initializeClient = async () => {
         }
         
         isInitializing = false;
+        
+        // Start keep-alive after successful initialization
+        // (also started on 'ready' event, but this ensures it starts even if event fires before this)
+        setTimeout(() => {
+            if (client && isReady) {
+                startKeepAlive();
+            }
+        }, 2000);
+        
     return client;
     } catch (error) {
         isInitializing = false;
