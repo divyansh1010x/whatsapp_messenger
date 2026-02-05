@@ -36,34 +36,18 @@ const applySendSeenPatch = async (page) => {
     
     try {
         await page.evaluate(() => {
-            if (window.WWebJS && typeof window.WWebJS.sendSeen === 'function') {
-                // Store original function
-                const originalSendSeen = window.WWebJS.sendSeen;
-                
-                // Replace with patched version
-                window.WWebJS.sendSeen = async function(chatId) {
-                    try {
-                        // Try to call original function
-                        return await originalSendSeen.call(this, chatId);
-                    } catch (error) {
-                        // Check if it's a markedUnread error
-                        const errorStr = error?.message || String(error) || '';
-                        const isMarkedUnreadError = 
-                            errorStr.includes('markedUnread') || 
-                            errorStr.includes('Cannot read properties of undefined');
-                        
-                        if (isMarkedUnreadError) {
-                            // Message was already sent successfully, ignore this error
-                            // This happens because sendSeen is called AFTER sendMessage
-                            return; // Return successfully, don't throw
-                        }
-                        
-                        // Re-throw other errors (network issues, authentication, etc.)
-                        throw error;
-                    }
+            if (window.WWebJS) {
+                // If patch already applied, skip
+                if (window.__sendSeenPatched) return true;
+
+                // Force sendSeen to a safe no-op to prevent markedUnread crashes.
+                // whatsapp-web.js calls sendSeen internally after a successful send;
+                // returning a resolved promise keeps the flow intact while avoiding
+                // "Cannot read properties of undefined (reading 'markedUnread')".
+                window.WWebJS.sendSeen = async function sendSeenNoop() {
+                    return;
                 };
-                
-                // Mark that patch was applied
+
                 window.__sendSeenPatched = true;
                 return true;
             }
@@ -73,6 +57,22 @@ const applySendSeenPatch = async (page) => {
     } catch (error) {
         console.warn('⚠️ Failed to apply sendSeen patch:', error.message);
         return false;
+    }
+};
+
+// Ensure the patch is present before sending messages
+const ensurePatched = async () => {
+    try {
+        let page = client?.pupPage;
+        if (page && typeof page.then === 'function') {
+            // pupPage can be a Promise
+            page = await page;
+        }
+        if (page) {
+            await applySendSeenPatch(page);
+        }
+    } catch (error) {
+        console.warn('⚠️ Failed to ensure sendSeen patch:', error.message);
     }
 };
 
@@ -294,6 +294,9 @@ const sendMessage = async (contacts) => {
     console.log(`\n🔍 === SEND MESSAGE STATUS CHECK ===`);
     console.log(`📋 isReady flag: ${isReady}`);
     console.log(`📋 client exists: ${!!client}`);
+
+    // Make sure sendSeen is patched before any send attempt
+    await ensurePatched();
     
     if (!client) {
         throw new Error("WhatsApp client not initialized");
@@ -333,7 +336,21 @@ const sendMessage = async (contacts) => {
         ]);
         console.log(`📊 Current client state: ${clientState}`);
         if (clientState !== 'CONNECTED') {
-            console.warn(`⚠️ Client state is ${clientState}, not CONNECTED. Attempting to send anyway...`);
+            console.warn(`⚠️ Client state is ${clientState}, not CONNECTED. Waiting up to 15s...`);
+            // Short wait-loop to avoid sending while stuck in OPENING
+            const start = Date.now();
+            while (Date.now() - start < 15000 && clientState !== 'CONNECTED') {
+                await new Promise(r => setTimeout(r, 1500));
+                try {
+                    clientState = await client.getState();
+                } catch (pollErr) {
+                    break;
+                }
+            }
+            if (clientState !== 'CONNECTED') {
+                throw new Error(`WhatsApp client not connected (state: ${clientState})`);
+            }
+            console.log(`✅ Client reached CONNECTED after wait`);
         } else {
             console.log(`✅ Client confirmed CONNECTED - ready to send messages`);
         }
@@ -421,7 +438,7 @@ const sendMessage = async (contacts) => {
                 }
             }
         } catch (stateCheckError) {
-            console.error(`❌ Error checking state during send: ${stateCheckError.message}`);
+                console.error(`❌ Error checking state during send: ${stateCheckError.message}`);
             // Continue anyway - might be temporary
         }
         const chatId = `${contact.number}@c.us`;
@@ -545,21 +562,7 @@ const sendMessage = async (contacts) => {
                     
                     try {
                         const verifyChat = await client.getChatById(chatId);
-                        let messagesAfter = [];
-                        try {
-                            messagesAfter = await verifyChat.fetchMessages({ limit: 10 });
-                        } catch (fetchError) {
-                            // If fetchMessages also fails with markedUnread, assume message was sent
-                            if (String(fetchError).includes('markedUnread')) {
-                                console.log(`⚠️ Cannot verify (markedUnread in fetchMessages) - assuming message was sent`);
-                                // Since we can't verify, and markedUnread happens AFTER sending,
-                                // assume the message was sent successfully
-                                successList.push({ number: contact.number });
-                                continue; // Skip to next contact
-                            } else {
-                                throw fetchError;
-                            }
-                        }
+                        const messagesAfter = await verifyChat.fetchMessages({ limit: 10 });
                         
                         const messageIdsBefore = new Set(messagesBefore.map(m => m.id._serialized || m.id.id || String(m.id)));
                         
@@ -579,17 +582,11 @@ const sendMessage = async (contacts) => {
                             throw sendError; // Re-throw to trigger retry
                         }
                     } catch (verifyError) {
-                        // If verification fails with markedUnread, assume message was sent
-                        if (String(verifyError).includes('markedUnread')) {
-                            console.log(`⚠️ Verification failed with markedUnread - assuming message was sent`);
-                            successList.push({ number: contact.number });
-                        } else {
-                            console.error(`❌ Could not verify: ${verifyError.message}`);
-                            throw sendError; // Re-throw to trigger retry
-                        }
+                        console.error(`❌ Could not verify after markedUnread: ${verifyError.message}`);
+                        throw sendError; // Re-throw to trigger retry
                     }
                 } else {
-                throw sendError;
+                    throw sendError;
                 }
             }
 
