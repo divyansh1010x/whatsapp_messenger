@@ -155,14 +155,52 @@ const initializeClient = async () => {
         console.log("📲 New QR code generated for frontend.");
     });
 
+    // Poll for CONNECTED state (shared helper)
+    const pollUntilConnected = async (label, maxAttempts = 90, delayMs = 2000) => {
+        if (!client) return;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const state = await client.getState();
+                if (attempt === 1 || attempt % 5 === 0 || state === 'CONNECTED') {
+                    console.log(`📊 [${label}] Client state (attempt ${attempt}/${maxAttempts}): ${state}`);
+                }
+                if (state === 'CONNECTED') {
+                    console.log(`✅ Client is now CONNECTED! (${label})`);
+                    isReady = true;
+                    latestQR = null;
+                    return true;
+                }
+                if (state === 'OPENING') {
+                    await new Promise(r => setTimeout(r, delayMs));
+                } else {
+                    await new Promise(r => setTimeout(r, delayMs));
+                }
+            } catch (error) {
+                console.error(`[${label}] Error checking state (attempt ${attempt}):`, error.message);
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+        }
+        return false;
+    };
+
     client.on("authenticated", () => {
         console.log("✅ WhatsApp authenticated. Session saved.");
         latestQR = null;
+        // Start polling for CONNECTED immediately — don't wait for "ready" which can be very slow on cloud
+        (async () => {
+            const ok = await pollUntilConnected("post-auth", 90, 2000); // 90 * 2s = 3 min
+            if (!ok) {
+                console.warn("⚠️ Post-auth poll timed out waiting for CONNECTED; ready event may still set isReady.");
+            }
+        })();
     });
 
     client.on("ready", async () => {
         console.log("🚀 WhatsApp client ready.");
-        
+        if (isReady) {
+            console.log("✅ Already marked ready from post-auth poll.");
+            return;
+        }
         // Apply sendSeen patch as backup (in case it wasn't applied during initialize)
         try {
             const page = client.pupPage;
@@ -172,44 +210,12 @@ const initializeClient = async () => {
         } catch (patchError) {
             console.warn('⚠️ Could not apply sendSeen patch in ready event:', patchError.message);
         }
-        
-        // Wait for CONNECTED state - it might take a moment after "ready" event
-        const waitForConnected = async () => {
-            const maxAttempts = 30; // 30 attempts = 30 seconds max
-            const delayMs = 1000; // Check every second
-            
-            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                try {
-                    const state = await client.getState();
-                    console.log(`📊 Client state (attempt ${attempt}/${maxAttempts}): ${state}`);
-                    
-                    if (state === 'CONNECTED') {
-                        console.log(`✅ Client is now CONNECTED!`);
-                        isReady = true;
-                        latestQR = null;
-                        return;
-                    } else if (state === 'OPENING') {
-                        console.log(`⏳ Still opening... waiting for CONNECTED state...`);
-                        // Wait before next check
-                        await new Promise(r => setTimeout(r, delayMs));
-                    } else {
-                        console.warn(`⚠️ Unexpected state: ${state}, waiting...`);
-                        await new Promise(r => setTimeout(r, delayMs));
-                    }
-                } catch (error) {
-                    console.error(`Error checking state (attempt ${attempt}):`, error.message);
-                    await new Promise(r => setTimeout(r, delayMs));
-                }
-            }
-            
-            // If we get here, we timed out waiting for CONNECTED
-            console.error("❌ Timeout waiting for CONNECTED state. Client may not be fully ready.");
-            // Still set as ready to allow attempts, but log warning
-        isReady = true;
-        latestQR = null;
-        };
-        
-        await waitForConnected();
+        const connected = await pollUntilConnected("ready", 45, 1000); // 45s
+        if (!connected) {
+            console.warn("⚠️ Ready handler timed out waiting for CONNECTED; setting isReady anyway.");
+            isReady = true;
+            latestQR = null;
+        }
     });
 
     client.on("disconnected", (reason) => {
