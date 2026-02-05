@@ -23,6 +23,7 @@ let client;
 let isReady = false;
 let latestQR = null; // Store latest QR as base64 for frontend
 let isInitializing = false; // Prevent multiple simultaneous initializations
+let hasAuthenticatedOnce = false; // Ensure authenticated handler runs only once per process
 
 /**
  * MONKEY-PATCH FUNCTION: Safely patches sendSeen to prevent markedUnread crashes
@@ -184,6 +185,12 @@ const initializeClient = async () => {
     };
 
     client.on("authenticated", () => {
+        // Guard against multiple authenticated events (can fire on reconnects)
+        if (hasAuthenticatedOnce) {
+            console.log("ℹ️ Authenticated event received again, ignoring duplicate.");
+            return;
+        }
+        hasAuthenticatedOnce = true;
         console.log("✅ WhatsApp authenticated. Session saved.");
         latestQR = null;
         // Start polling for CONNECTED immediately — don't wait for "ready" which can be very slow on cloud
@@ -464,7 +471,7 @@ const sendMessage = async (contacts) => {
 
             // Send message - record timestamp BEFORE sending to verify new messages
             let result;
-            const sendTimeout = 20000; // 20 seconds
+            const sendTimeout = 60000; // 60 seconds - WhatsApp can be slow to ack
             const sendStartTime = Date.now(); // Record when we START sending
             
             // Get messages before sending to compare later (wrap in try-catch to avoid markedUnread)
@@ -521,7 +528,7 @@ const sendMessage = async (contacts) => {
                 
                 // Handle timeout specifically
                 if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
-                    console.error(`⏱️ Send timeout for ${contact.number} - message may still be sending`);
+                    console.error(`⏱️ Send timeout for ${contact.number} after ${sendTimeout/1000}s - message may still be sending`);
                     // Wait a bit and check if message was sent despite timeout
                     await new Promise(r => setTimeout(r, 3000));
                     
@@ -530,14 +537,15 @@ const sendMessage = async (contacts) => {
                         const verifyChat = await client.getChatById(chatId);
                         const messages = await verifyChat.fetchMessages({ limit: 10 });
                         
-                        // Find message with exact match and recent timestamp
+                        // Find message with exact match and reasonably recent timestamp
                         const found = messages.find(m => {
                             if (!m.fromMe) return false;
                             if (m.body !== contact.message) return false; // EXACT match
                             
                             const messageTime = m.timestamp * 1000;
                             const timeDiff = beforeTimeout - messageTime;
-                            return timeDiff < 25000 && timeDiff > -5000; // Within 25 seconds (timeout + buffer)
+                            // Allow a wide window since network/device latency can be high
+                            return timeDiff < 120000 && timeDiff > -10000; // within ~2 minutes
                         });
                         
                         if (found) {
